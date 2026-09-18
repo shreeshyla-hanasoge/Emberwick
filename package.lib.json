@@ -1,6 +1,6 @@
 {
   "name": "emberwick",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Smooth flowing candlestick charts for the web — canvas-rendered, zero-dependency, pluggable data feeds.",
   "license": "MIT",
   "homepage": "https://emberwick.ldio.app",

@@ -3,6 +3,18 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-09-19
+
+Metadata only. The code is identical to 0.4.1; nothing needs re-testing.
+
+### Added
+
+- `repository`, `homepage` and `bugs` in the published manifest, so the npm
+  package page links back to the source, the demo and the issue tracker. These
+  belong in `package.lib.json` — the root `package.json` is private and never
+  reaches the registry — and 0.4.1 shipped without them. npm versions are
+  immutable, hence a new patch rather than a corrected republish.
+
 ## [0.4.1] — 2026-09-19
 
 Bug-fix release. Three feed-lifecycle races could put wrong prices on screen,
