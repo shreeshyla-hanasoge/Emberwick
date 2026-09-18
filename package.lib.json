@@ -3,6 +3,7 @@
   "version": "0.4.2",
   "description": "Smooth flowing candlestick charts for the web — canvas-rendered, zero-dependency, pluggable data feeds.",
   "license": "MIT",
+  "author": "Shreeshyla Hanasoge <shreeshyla.hanasoge@gmail.com>",
   "homepage": "https://emberwick.ldio.app",
   "bugs": {
     "url": "https://github.com/shreeshyla-hanasoge/Emberwick/issues"

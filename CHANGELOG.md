@@ -9,8 +9,9 @@ Metadata only. The code is identical to 0.4.1; nothing needs re-testing.
 
 ### Added
 
-- `repository`, `homepage` and `bugs` in the published manifest, so the npm
-  package page links back to the source, the demo and the issue tracker. These
+- `repository`, `homepage`, `bugs` and `author` in the published manifest, so
+  the npm package page links back to the source, the demo and the issue
+  tracker, and carries a publisher byline. These
   belong in `package.lib.json` — the root `package.json` is private and never
   reaches the registry — and 0.4.1 shipped without them. npm versions are
   immutable, hence a new patch rather than a corrected republish.
