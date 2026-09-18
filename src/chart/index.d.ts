@@ -432,6 +432,11 @@ export declare class Chart {
   subscribe(event: 'markerHover', fn: (marker: ResolvedMarker | null) => void): () => void
   subscribe(event: 'visibleRange', fn: (range: VisibleRangePayload) => void): () => void
   subscribe(event: 'replay', fn: (state: ReplayState) => void): () => void
+  /**
+   * Feed failures: a rejected `getBars()` from either `setFeed()` or lazy
+   * history paging. With no subscriber the error is logged instead.
+   */
+  subscribe(event: 'error', fn: (error: unknown) => void): () => void
 
   /** Removes listeners, canvases and the render loop. */
   destroy(): void

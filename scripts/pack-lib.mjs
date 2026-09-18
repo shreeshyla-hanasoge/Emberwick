@@ -31,7 +31,7 @@ const manifest = JSON.parse(await readFile(resolve(root, 'package.lib.json'), 'u
 await writeFile(resolve(out, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
 
 // 2. docs + licence
-for (const f of ['README.md', 'LICENSE']) {
+for (const f of ['README.md', 'LICENSE', 'CHANGELOG.md']) {
   if (existsSync(resolve(root, f))) {
     await copyFile(resolve(root, f), resolve(out, f))
   }

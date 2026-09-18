@@ -11,7 +11,8 @@
     "build:umd": "vite build --config vite.umd.config.js",
     "pack:lib": "node scripts/pack-lib.mjs",
     "size": "node scripts/check-size.mjs",
-    "release": "npm run build:lib && npm run build:umd && npm run pack:lib && npm run size"
+    "release": "npm test && npm run build:lib && npm run build:umd && npm run pack:lib && npm run size",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

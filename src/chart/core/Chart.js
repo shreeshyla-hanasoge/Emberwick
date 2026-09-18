@@ -50,12 +50,19 @@ export class Chart {
     this._loadingHistory = false
     this._exhausted = false
     this._replay = null
+    // Every async feed read is stamped with the generation current when it
+    // STARTED. setFeed/detachFeed/destroy bump the counter, so a slow earlier
+    // request that resolves second recognises itself as stale and drops its
+    // result instead of writing over the newer feed's bars.
+    this._feedGen = 0
+    this._destroyed = false
     this._listeners = {
       crosshair: new Set(),
       visibleRange: new Set(),
       markerClick: new Set(),
       markerHover: new Set(),
       replay: new Set(),
+      error: new Set(),
     }
 
     // ---- annotations --------------------------------------------------
@@ -166,17 +173,34 @@ export class Chart {
     this.detachFeed()
     this.feed = feed
     if (!feed) return
+    const gen = ++this._feedGen
     this.ts.timeframeMs = feed.timeframe || this.ts.timeframeMs
-    const bars = await feed.getBars({
-      symbol: feed.symbol,
-      timeframe: feed.timeframe,
-      to: null,
-      limit: this.options.initialBars || 1500,
-    })
+    let bars
+    try {
+      bars = await feed.getBars({
+        symbol: feed.symbol,
+        timeframe: feed.timeframe,
+        to: null,
+        limit: this.options.initialBars || 1500,
+      })
+    } catch (err) {
+      if (gen !== this._feedGen || this._destroyed) return
+      this._emitError(err, 'setFeed')
+      return
+    }
+    // Another setFeed(), a detachFeed() or a destroy() landed while we were
+    // awaiting: this result belongs to a chart state that no longer exists.
+    if (gen !== this._feedGen || this._destroyed) return
     this.setData(bars)
-    if (typeof feed.prime === 'function') feed.prime(bars[bars.length - 1])
+    // Read back the SANITISED array rather than the raw return value:
+    // setData() has already coerced a non-array to [], and prime() is
+    // documented as taking Bar | undefined.
+    if (typeof feed.prime === 'function') feed.prime(this.bars[this.bars.length - 1])
     this._unsub = feed.subscribe((msg) => {
       if (!msg || !msg.bar) return
+      // A subscription that outlived its generation must never write bars —
+      // two feeds on one timeframe otherwise target the same forming candle.
+      if (gen !== this._feedGen || this._destroyed) return
       // During replay the feed is the FUTURE arriving: let it run, ignore it.
       if (this._replay) return
       if (msg.type === 'append') this.append(msg.bar)
@@ -185,6 +209,10 @@ export class Chart {
   }
 
   detachFeed() {
+    // Bumping the generation is what cancels in-flight work: neither
+    // getBars() promise can be aborted, so instead they resolve into no-ops.
+    this._feedGen++
+    this._loadingHistory = false
     if (this._unsub) this._unsub()
     this._unsub = null
     this.feed = null
@@ -199,37 +227,67 @@ export class Chart {
     if (from > 80 || !this.bars.length) return
 
     this._loadingHistory = true
+    // Bind this page to the feed that asked for it. Everything after the await
+    // must prove it still belongs to that feed before touching shared state —
+    // including _exhausted, which a stale page could otherwise latch on a
+    // fresh symbol that still has years of history.
+    const gen = this._feedGen
+    const feed = this.feed
     try {
-      const oldest = this.bars[0].time
-      const older = await this.feed.getBars({
-        symbol: this.feed.symbol,
-        timeframe: this.feed.timeframe,
-        to: oldest,
+      const older = await feed.getBars({
+        symbol: feed.symbol,
+        timeframe: feed.timeframe,
+        to: this.bars[0].time,
         limit: 1000,
       })
+      if (gen !== this._feedGen || this._destroyed) return
+      if (!this.bars.length) return
       if (!older || !older.length) {
         this._exhausted = true
-      } else {
-        const added = older.filter((b) => b.time < oldest)
-        if (!added.length) {
-          this._exhausted = true
-        } else {
-          this.bars = added.concat(this.bars)
-          // keep the view pinned to the same bars: indices all shifted right
-          const wasFollowing = this.ts.follow
-          this.ts.barCount = this.bars.length
-          this.ts._right.jump(this.ts._right.value + added.length)
-          this.ts._right.set(this.ts._right.target + added.length)
-          this.ts.follow = wasFollowing
-          this.loop.invalidate('all')
-        }
+        return
       }
-    } catch (e) {
-      console.error('[Emberwick] history load failed', e)
+      // Re-read the boundary AFTER the await. Filtering against the stale
+      // pre-await value can splice a page into the middle of the array and
+      // break the ascending-by-time invariant that nearestIndex()'s binary
+      // search and the candle draw order both depend on.
+      const boundary = this.bars[0].time
+      const added = older.filter((b) => b.time < boundary)
+      if (!added.length) {
+        this._exhausted = true
+        return
+      }
+      this.bars = added.concat(this.bars)
+      // Keep the view pinned to the same bars: every index shifted right.
+      // Smoothed.jump() writes BOTH value and target, so it alone pins the
+      // view. The set() that used to follow re-read the already-shifted
+      // target and added the page size a SECOND time, easing the viewport
+      // past the newest bar — which pushed `from` above the 80-bar threshold
+      // and disabled lazy paging permanently.
+      this.ts.barCount = this.bars.length
+      this.ts._right.jump(this.ts._right.value + added.length)
+      this.loop.invalidate('all')
+    } catch (err) {
+      if (gen !== this._feedGen || this._destroyed) return
       this._exhausted = true
+      this._emitError(err, 'loadHistory')
     } finally {
-      this._loadingHistory = false
+      // Only the generation that owns the latch may release it, or a stale
+      // request finishing late would unlock a load already in progress.
+      if (gen === this._feedGen) this._loadingHistory = false
     }
+  }
+
+  /**
+   * Feed failures are delivered as an 'error' event so an adapter can react.
+   * With no subscriber they still reach the console rather than vanishing.
+   */
+  _emitError(err, phase) {
+    const set = this._listeners.error
+    if (!set.size) {
+      console.error(`[Emberwick] ${phase} failed`, err)
+      return
+    }
+    for (const fn of set) fn(err)
   }
 
   // ---------------------------------------------------------------- events --
@@ -725,6 +783,10 @@ export class Chart {
   }
 
   destroy() {
+    // Idempotent: Layers.destroy() throws on an already-emptied canvas map,
+    // and both framework adapters can unmount twice (React StrictMode).
+    if (this._destroyed) return
+    this._destroyed = true
     const el = this.container
     el.removeEventListener('pointerdown', this._onDown)
     el.removeEventListener('pointermove', this._onMove)

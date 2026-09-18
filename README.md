@@ -246,16 +246,36 @@ off()  // unsubscribe
 
 | Event | Payload |
 |---|---|
-| Event | Payload |
-|---|---|
 | `'crosshair'` | `{ index, bar, price }`, or `null` when the pointer leaves the plot |
 | `'markerHover'` | The marker under the pointer, or `null` when none is |
 | `'markerClick'` | The clicked marker. Only fires on a hit, never with `null` |
 | `'visibleRange'` | `{ from, to, fromTime, toTime, barCount, spacing, settled }` |
 | `'replay'` | `{ active, playing, index, length, progress, speed, time, bar, atEnd }` |
+| `'error'` | The thrown value from a failed feed read. See below |
 
 A drag that happens to end on top of a marker does not fire `'markerClick'` —
 panning and clicking stay distinct.
+
+### Feed errors
+
+`getBars()` is your code, so it can reject — a 502, an expired token, an
+aborted request. Both paths that call it (`setFeed()` and the lazy history
+paging) route a rejection to `'error'` rather than letting it escape as an
+unhandled rejection:
+
+```js
+chart.subscribe('error', (err) => {
+  toast('Could not load market data')
+  console.error(err)
+})
+```
+
+With no `'error'` subscriber the failure is logged to the console instead of
+vanishing. `setFeed()` itself never rejects, so `await chart.setFeed(feed)`
+is safe to leave unguarded; subscribe to `'error'` to react to the failure.
+
+A failed history page sets the same "stop asking" latch an empty page does, so
+the chart will not retry that boundary on every pan.
 
 ### Tracking the visible range
 
