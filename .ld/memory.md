@@ -105,13 +105,23 @@ Also available on demand as `chart.visibleRange()`.
   `from` stays 0.
 
 ## TODOs
-- **Publish 0.2.0 to npm** (`npm run release && npm publish ./dist-lib`) —
-  version is bumped in source but the registry still has 0.1.0, and the
-  landing page now advertises annotations + range events
+- **Publish 0.3.0 to npm** (`npm run release && npm publish ./dist-lib`) —
+  annotations + visibleRange ship together as **0.3.0**. 0.2.0 was never
+  published, so the registry jumps 0.1.0 → 0.3.0 (a version gap is fine).
+  The two "(v0.2.0, in source)" headings below are stale: both features
+  are 0.3.0.
+- Version lives in exactly TWO places: `src/chart/index.js` (`version`) and
+  `package.lib.json`. The landing page renders `v{version}` in the hero pill
+  and the annotations tag, so bumping the export updates both labels.
 - Visually confirm rendering + 60fps on emberwick.ldio.app (never eyeballed)
-- Landing page IS built into dist/ (annotations section + live visibleRange
-  readout under the hero chart, driven by the real event). Still needs the
-  editor's Publish button to reach the public URL.
+- Landing page has BOTH v0.3.0 features as full sections in source:
+  `#annotations` ("Mark up the chart") and `#range` ("Know what's on screen" —
+  live 900-bar chart + viewport mini-map + live payload table, positioned
+  entirely from the event), plus the hero pill, a "Range-aware" feature card
+  and the range readout under the hero chart.
+- dist/ is STALE: no build since the 0.3.0 version bump or the range section,
+  so the built bundle (and the public URL) still show 0.2.0 content. Needs a
+  build, then the editor's Publish button.
 - dist/assets/ has ~10 stale hashed bundles from earlier builds; harmless,
   but worth pruning sometime
 - OHLCV legend lives in the playground, NOT in the shipped package

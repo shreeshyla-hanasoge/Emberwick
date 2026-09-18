@@ -310,6 +310,129 @@ const FEATURES = [
   },
 ]
 
+/* ---------------------------------------------------------------- range -- */
+/**
+ * visibleRange demo. The overview strip and the payload table are positioned
+ * and filled from the event and nothing else — no polling, no debounce, no
+ * rAF of our own.
+ *
+ * Static dataset on purpose: panning and zooming IS the story here, so a live
+ * feed would only move the goalposts while the reader experiments.
+ */
+function RangeChart() {
+  const hostRef = useRef(null)
+  const [ready, setReady] = useState(false)
+  const [range, setRange] = useState(null)
+
+  useEffect(() => {
+    let disposed = false
+    let off = null
+    const chart = createChart(hostRef.current, {
+      theme: { ...defaultTheme, background: '#0a0d15' },
+      timeScale: { spacing: 3.2, rightOffset: 8 },
+    })
+    const feed = new RandomFeed({
+      symbol: 'EMBR',
+      timeframe: 60000,
+      seed: 90210,
+      start: 74.8,
+      volatility: 0.0021,
+    })
+
+    feed
+      .getBars({ symbol: 'EMBR', timeframe: 60000, to: null, limit: 900 })
+      .then((bars) => {
+        if (disposed || !bars.length) return
+        chart.setData(bars)
+        off = chart.subscribe('visibleRange', (r) => {
+          if (!disposed) setRange(r)
+        })
+        setReady(true)
+      })
+
+    return () => {
+      disposed = true
+      if (off) off()
+      chart.destroy()
+    }
+  }, [])
+
+  // The whole overview strip is these two numbers.
+  const win =
+    range && range.barCount
+      ? {
+          left: (range.from / range.barCount) * 100,
+          width: Math.max(1.2, ((range.to - range.from + 1) / range.barCount) * 100),
+        }
+      : null
+
+  return (
+    <>
+      <div className="lp-rangechart">
+        <div className="lp-chartwrap">
+          <div className="lp-chartbar">
+            <span className="lp-dot lp-dot-a" />
+            <span className="lp-dot lp-dot-b" />
+            <span className="lp-dot lp-dot-c" />
+            <span className="lp-chartbar-title">EMBR · 1m · 900 bars loaded</span>
+          </div>
+          <div className="lp-chart lp-chart-sm" ref={hostRef}>
+            {!ready && <div className="lp-chart-loading">generating market…</div>}
+          </div>
+          <div className="lp-chartfoot">
+            <p className="lp-chart-hint">
+              pan and zoom — the strip below is positioned from the payload, nothing else
+            </p>
+          </div>
+        </div>
+
+        <div className="lp-minimap" aria-hidden="true">
+          <span className="lp-minimap-l">loaded history</span>
+          {win && (
+            <div
+              className="lp-minimap-win"
+              style={{ left: `${win.left}%`, width: `${win.width}%` }}
+            />
+          )}
+        </div>
+      </div>
+
+      <div className="lp-payload">
+        <div className="lp-codehead">subscribe('visibleRange') → payload</div>
+        {range ? (
+          <dl className="lp-payloadlist">
+            <dt>from</dt>
+            <dd><b>{range.from}</b></dd>
+            <dt>to</dt>
+            <dd><b>{range.to}</b></dd>
+            <dt>fromTime</dt>
+            <dd>{range.fromTime}</dd>
+            <dt>toTime</dt>
+            <dd>{range.toTime}</dd>
+            <dt>barCount</dt>
+            <dd>{range.barCount}</dd>
+            <dt>spacing</dt>
+            <dd>
+              {range.spacing.toFixed(2)}
+              <span className="lp-unit">px / bar</span>
+            </dd>
+            <dt>settled</dt>
+            <dd>{String(range.settled)}</dd>
+          </dl>
+        ) : (
+          <div className="lp-payloadwait">waiting for the first event…</div>
+        )}
+        <p className="lp-payloadnote">
+          Fires once the moment you subscribe, then only when the window really
+          changes. <code>settled</code> is <code>false</code> mid-glide and{' '}
+          <code>true</code> on the last event of every gesture — so you can defer
+          the expensive work without writing a debounce.
+        </p>
+      </div>
+    </>
+  )
+}
+
 const ROADMAP = [
   { t: 'Replay scrubber', d: 'Step history bar-by-bar at 1×–500× — backtesting playback, built on the motion engine.', next: true },
   { t: 'Indicators & panes', d: 'SMA, EMA, VWAP, RSI, MACD in resizable sub-panes, plus a plugin hook for your own.' },
@@ -333,6 +456,7 @@ export default function Landing() {
         <nav className="lp-navlinks">
           <a href="#features">Features</a>
           <a href="#annotations">Annotations</a>
+          <a href="#range">Range events</a>
           <a href="#usage">Usage</a>
           <a href="#roadmap">Roadmap</a>
           <a href={NPM_URL} target="_blank" rel="noreferrer">npm</a>
@@ -459,6 +583,64 @@ chart.subscribe('markerClick', (m) => openTicket(m.data.orderId))`}</pre>
         </div>
       </section>
 
+      {/* ---- range events ---- */}
+      <section className="lp-section" id="range">
+        <span className="lp-tag">new in v{version}</span>
+        <h2>Know what&rsquo;s on screen</h2>
+        <p className="lp-lede">
+          One subscription reports the window the user is actually looking at —
+          bar indices, timestamps and pixels per bar. Paginate history, sync a
+          second chart, switch timeframe, or drive an overview strip like the
+          one below.
+        </p>
+
+        <div className="lp-rangegrid">
+          <RangeChart />
+        </div>
+
+        <div className="lp-annofacts">
+          <div className="lp-annofact">
+            <h3>Answers immediately</h3>
+            <p>
+              A state event, not a notification: your handler is called the
+              moment you subscribe, with the window as it already stands.
+              Nothing waits for the user to touch the chart first.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>No debounce needed</h3>
+            <p>
+              Indices are integers, so a slow drag emits a handful of events
+              rather than one per frame. <code>spacing</code> is reported but
+              deliberately kept out of the change test — easing it would fire
+              sixty times a second.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Survives new history</h3>
+            <p>
+              Timestamps are part of the identity, so prepending an older page
+              re-emits even though <code>from</code> is still zero. A
+              pagination guard cannot get itself stuck.
+            </p>
+          </div>
+        </div>
+
+        <div className="lp-code lp-rangecode">
+          <div className="lp-codehead">Paginating on demand</div>
+          <pre>{`// with a feed attached the chart paginates on its own —
+// this is the manual path, for when you own the data
+chart.subscribe('visibleRange', async (r) => {
+  if (!r.settled || r.from > 50 || loading) return   // wait for the glide to stop
+
+  loading = true
+  const older = await api.candles({ to: r.fromTime, limit: 500 })
+  chart.setData(older.concat(chart.bars))
+  loading = false
+})`}</pre>
+        </div>
+      </section>
+
       {/* ---- usage ---- */}
       <section className="lp-section" id="usage">
         <h2>Four lines to a live chart</h2>
@@ -532,8 +714,9 @@ class MyFeed extends DataFeed {
       <section className="lp-section" id="roadmap">
         <h2>Where it's going</h2>
         <p className="lp-lede">
-          v{version} adds the annotation layer on top of the rendering and motion
-          core. Honest about what isn't there yet — here's the order it's coming in.
+          v{version} adds the annotation layer and range events on top of the
+          rendering and motion core. Honest about what isn't there yet — here's
+          the order it's coming in.
         </p>
         <div className="lp-road">
           {ROADMAP.map((r) => (
