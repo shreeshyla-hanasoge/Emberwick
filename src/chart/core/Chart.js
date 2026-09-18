@@ -384,7 +384,63 @@ export class Chart {
     const set = this._listeners[event]
     if (!set) throw new Error(`Chart: unknown event "${event}"`)
     set.add(fn)
+    // 'visibleRange' is a state event, not a notification: a new subscriber is
+    // told the CURRENT window straight away, so it never has to wait for the
+    // user to pan before it knows what is on screen.
+    if (event === 'visibleRange') {
+      const payload = this.visibleRange()
+      this._rangeKey = this._rangeIdentity(payload)
+      fn(payload)
+    }
     return () => set.delete(fn)
+  }
+
+  // ------------------------------------------------------------------ range --
+  /**
+   * The window currently on screen. Cheap enough to poll, though
+   * subscribe('visibleRange', fn) is the better way to track it.
+   */
+  visibleRange() {
+    const { from, to } = this.ts.visibleRange()
+    return this._rangePayload(from, to)
+  }
+
+  _rangePayload(from, to) {
+    const n = this.bars.length
+    return {
+      from,
+      to,
+      fromTime: n ? this.bars[from].time : null,
+      toTime: n ? this.bars[to].time : null,
+      barCount: n,
+      spacing: this.ts.spacing,
+      settled: this.ts.settled,
+    }
+  }
+
+  _rangeIdentity(p) {
+    return `${p.from}:${p.to}:${p.fromTime}:${p.toTime}:${p.settled ? 1 : 0}`
+  }
+
+  /**
+   * Fires only when the window actually changed, so a consumer can hang a
+   * fetch off it without debouncing. Two deliberate choices:
+   *
+   * - `spacing` is NOT part of the identity. It is a float that moves on every
+   *   frame of an eased zoom, so keying on it would make this a 60/sec
+   *   firehose. It is still reported, for level-of-detail decisions.
+   * - `settled` IS part of the identity, so the final event of a gesture
+   *   always arrives with settled:true. Without it, code that defers expensive
+   *   work until the view stops moving would wait forever.
+   */
+  _emitVisibleRange(from, to) {
+    const set = this._listeners.visibleRange
+    if (!set.size) return
+    const payload = this._rangePayload(from, to)
+    const key = this._rangeIdentity(payload)
+    if (key === this._rangeKey) return // undefined on the first frame, so it emits
+    this._rangeKey = key
+    for (const fn of set) fn(payload)
   }
 
   // ----------------------------------------------------------- annotations --
@@ -490,6 +546,11 @@ export class Chart {
     if (redrawAll || dirty.has('overlay')) {
       drawCrosshair(this.layers.ctx.overlay, state)
     }
+
+    // Emitted after drawing, deliberately: a handler is free to call
+    // setData() or setMarkers(), and by this point the renderers have
+    // finished reading the state it would mutate.
+    this._emitVisibleRange(from, to)
 
     return animating
   }

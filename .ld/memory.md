@@ -88,13 +88,29 @@ Phases 0–2 and 7 complete, plus a marketing landing page.
 - Autoscale fits BARS only; annotations outside the bar range are off-screen.
   The landing demo derives its prices from the bars' own hi/lo for that reason.
 
+## visibleRange event (v0.2.0, in source — NOT yet on npm)
+Emitted from the END of `Chart._frame` (after drawing, so a handler may call
+setData/setMarkers safely). Payload:
+`{ from, to, fromTime, toTime, barCount, spacing, settled }`.
+Also available on demand as `chart.visibleRange()`.
+- It is a STATE event: `subscribe('visibleRange', fn)` calls fn immediately
+  with the current window, so a consumer never waits for a pan.
+- Dedup key = `from:to:fromTime:toTime:settled` (`Chart._rangeIdentity`).
+  `spacing` is deliberately EXCLUDED — it is a float that moves every frame of
+  an eased zoom, so keying on it would emit 60/sec. `settled` is INCLUDED so
+  the last event of a gesture always arrives with settled:true (otherwise
+  "defer work until the view stops" would never fire).
+- `_rangeKey` is lazily created (undefined on the first frame → first emit).
+- Times are in the key, so a prepended history page re-emits even though
+  `from` stays 0.
+
 ## TODOs
 - **Publish 0.2.0 to npm** (`npm run release && npm publish ./dist-lib`) —
   version is bumped in source but the registry still has 0.1.0, and the
-  landing page now advertises markers
+  landing page now advertises annotations + range events
 - Visually confirm rendering + 60fps on emberwick.ldio.app (never eyeballed)
-- Landing page + markers are built but NOT yet published to the public URL
-- `subscribe('visibleRange', fn)` is accepted but NEVER emitted — wire it up
+- Landing page, markers and range events are built but NOT yet published to
+  the public URL
 - OHLCV legend lives in the playground, NOT in the shipped package
 - Markers are not draggable (hover/click only)
 - Phase 4: indicators (SMA/EMA/VWAP/RSI/MACD) + multi-pane layout

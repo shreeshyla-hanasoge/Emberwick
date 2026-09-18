@@ -179,6 +179,28 @@ export interface CrosshairPayload {
   price: number
 }
 
+/** Payload of the 'visibleRange' event, and the return of chart.visibleRange(). */
+export interface VisibleRangePayload {
+  /** First visible bar index, clamped to the loaded data. */
+  from: number
+  /** Last visible bar index, clamped to the loaded data. */
+  to: number
+  /** `bars[from].time`, or null when no bars are loaded. */
+  fromTime: number | null
+  /** `bars[to].time`, or null when no bars are loaded. */
+  toTime: number | null
+  /** Total bars currently loaded. */
+  barCount: number
+  /** Current pixels per bar — useful for level-of-detail decisions. */
+  spacing: number
+  /**
+   * False while the view is still easing. The last event of a gesture always
+   * arrives with `settled: true`, so it is safe to defer expensive work
+   * (a fetch, a re-aggregation) until you see it.
+   */
+  settled: boolean
+}
+
 /* ------------------------------------------------------------------ feed -- */
 
 export interface GetBarsRequest {
@@ -306,14 +328,20 @@ export declare class Chart {
   /** Rolling frames-per-second of the render loop. */
   readonly fps: number
 
+  /** The window currently on screen. Cheap enough to poll. */
+  visibleRange(): VisibleRangePayload
+
   /**
    * Subscribe to a chart event. Returns an unsubscribe function.
-   * NOTE: 'visibleRange' is accepted but is not currently emitted.
+   *
+   * 'visibleRange' is a state event rather than a notification: a new
+   * subscriber is called immediately with the current window, and then only
+   * when that window actually changes — so no debouncing is required.
    */
   subscribe(event: 'crosshair', fn: (payload: CrosshairPayload | null) => void): () => void
   subscribe(event: 'markerClick', fn: (marker: ResolvedMarker) => void): () => void
   subscribe(event: 'markerHover', fn: (marker: ResolvedMarker | null) => void): () => void
-  subscribe(event: 'visibleRange', fn: (range: { from: number; to: number }) => void): () => void
+  subscribe(event: 'visibleRange', fn: (range: VisibleRangePayload) => void): () => void
 
   /** Removes listeners, canvases and the render loop. */
   destroy(): void

@@ -274,10 +274,13 @@ const FEATURES = [
     t: 'Yours to theme',
     d: 'A flat 20-key theme object — colours, fonts, axis sizing — swappable at runtime. Dark and light presets included, plus toImage() for a PNG snapshot.',
   },
+  {
+    t: 'Range-aware',
+    d: "subscribe('visibleRange') reports the window on screen — bar indices, timestamps and px-per-bar — the moment you subscribe and then only when it truly changes. Paginate history, sync a second chart, or switch timeframe off it, no debouncing required.",
+  },
 ]
 
 const ROADMAP = [
-  { t: 'visibleRange events', d: 'Hook pan and zoom to drive your own fetching or sync a second widget.', next: true },
   { t: 'Replay scrubber', d: 'Step history bar-by-bar at 1×–500× — backtesting playback, built on the motion engine.', next: true },
   { t: 'Indicators & panes', d: 'SMA, EMA, VWAP, RSI, MACD in resizable sub-panes, plus a plugin hook for your own.' },
   { t: 'Drawing tools', d: 'Trendlines, Fibonacci, position tool — with hit-testing, undo/redo and serialisable state.' },
@@ -310,7 +313,7 @@ export default function Landing() {
       {/* ---- hero ---- */}
       <section className="lp-hero">
         <span className="lp-pill">
-          <span className="lp-pulse" /> new in v{version} — markers &amp; annotations
+          <span className="lp-pulse" /> new in v{version} — annotations &amp; range events
         </span>
         <h1>
           Candlestick charts that

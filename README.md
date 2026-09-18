@@ -242,13 +242,50 @@ off()  // unsubscribe
 
 | Event | Payload |
 |---|---|
+| Event | Payload |
+|---|---|
 | `'crosshair'` | `{ index, bar, price }`, or `null` when the pointer leaves the plot |
 | `'markerHover'` | The marker under the pointer, or `null` when none is |
 | `'markerClick'` | The clicked marker. Only fires on a hit, never with `null` |
-| `'visibleRange'` | **Accepted but never emitted.** See *Known gaps* |
+| `'visibleRange'` | `{ from, to, fromTime, toTime, barCount, spacing, settled }` |
 
 A drag that happens to end on top of a marker does not fire `'markerClick'` —
 panning and clicking stay distinct.
+
+### Tracking the visible range
+
+`'visibleRange'` is a **state** event rather than a notification, which makes it
+usable without any debouncing of your own:
+
+- A new subscriber is called **immediately** with the current window, so it
+  never has to wait for the user to pan before it knows what is on screen.
+- It then fires **only when the window actually changes**. Indices are
+  integers, so a slow pan at 9px/bar produces roughly one event every nine
+  frames, not one per frame.
+- `spacing` is reported but is deliberately *not* part of the change test — it
+  is a float that moves every frame of an eased zoom, and keying on it would
+  turn this into a 60/sec firehose. Use it for level-of-detail decisions.
+- `settled` *is* part of the change test, so the final event of a gesture
+  always arrives with `settled: true`. That makes "wait until the view stops
+  moving, then do the expensive thing" a safe pattern.
+
+```js
+const off = chart.subscribe('visibleRange', async (r) => {
+  // paginate backwards when the user approaches the left edge
+  if (r.from < 50 && r.settled && r.fromTime) {
+    const older = await myApi.bars({ to: r.fromTime, limit: 500 })
+    chart.setData(older.concat(chart.bars))
+  }
+})
+```
+
+Syncing a second chart is the other common use — feed `fromTime`/`toTime`
+straight into the other instance. And `chart.visibleRange()` returns the same
+payload on demand if you would rather poll than subscribe.
+
+> The chart also paginates backwards **on its own** through
+> `feed.getBars({ to })` whenever you have attached a feed. This event is for
+> when you want to drive that yourself, or to drive something other than data.
 
 ---
 
@@ -607,8 +644,6 @@ src/App.jsx, src/styles.css  the playground (not published)
 
 Honest list of what isn't there yet:
 
-- **`subscribe('visibleRange', fn)` never fires.** The event is accepted and
-  the handler is stored, but nothing emits it. Use `'crosshair'` for now.
 - **No OHLCV legend in the package.** `subscribe('crosshair', fn)` gives you
   the hovered bar; rendering the readout is still yours to do.
 - **Markers are not draggable.** They are hit-tested for hover and click, but

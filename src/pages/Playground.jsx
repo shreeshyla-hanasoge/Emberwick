@@ -61,6 +61,7 @@ export default function Playground() {
   const [ready, setReady] = useState(false)
   const [fps, setFps] = useState(0)
   const [legend, setLegend] = useState(null)
+  const [range, setRange] = useState(null)
   const [hovering, setHovering] = useState(false)
   const [paused, setPaused] = useState(false)
   const [dark, setDark] = useState(true)
@@ -105,6 +106,9 @@ export default function Playground() {
       if (payload) setLegend(payload.bar)
     })
     const offClick = chart.subscribe('markerClick', (m) => setClicked(m))
+    // No polling and no debounce: the event fires on subscribe with the
+    // current window, then only when that window actually changes.
+    const offRange = chart.subscribe('visibleRange', setRange)
 
     const id = setInterval(() => {
       setFps(chart.fps)
@@ -117,6 +121,7 @@ export default function Playground() {
       clearInterval(id)
       off()
       offClick()
+      offRange()
       feed.destroy()
       chart.destroy()
       chartRef.current = null
@@ -196,7 +201,12 @@ export default function Playground() {
         )}
         <span className="spacer" />
         <span className={`fps ${fps >= 55 ? 'good' : fps >= 30 ? 'ok' : 'bad'}`}>{fps} fps</span>
-        <span className="count">{chartRef.current?.bars.length ?? 0} bars</span>
+        <span className="count" title="live from subscribe('visibleRange')">
+          {range
+            ? `bars ${range.from}–${range.to} of ${range.barCount} · ${fmt(range.spacing, 1)}px`
+            : '—'}
+          {range && !range.settled && <i className="moving" />}
+        </span>
       </div>
 
       <div className="chart-host" ref={hostRef}>
