@@ -3,6 +3,14 @@
   "version": "0.4.1",
   "description": "Smooth flowing candlestick charts for the web — canvas-rendered, zero-dependency, pluggable data feeds.",
   "license": "MIT",
+  "homepage": "https://emberwick.ldio.app",
+  "bugs": {
+    "url": "https://github.com/shreeshyla-hanasoge/Emberwick/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shreeshyla-hanasoge/Emberwick.git"
+  },
   "type": "module",
   "sideEffects": [
     "./webcomponent.js"
