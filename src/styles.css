@@ -388,12 +388,51 @@ body.lock { overflow: hidden; }
   pointer-events: none; z-index: 10;
 }
 
-.lp-chart-hint {
+.lp-chartfoot {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px 14px;
   padding: 10px 14px;
   border-top: 1px solid var(--border);
+}
+
+.lp-chart-hint {
   font-size: 11.5px;
   color: var(--muted);
   text-align: left;
+}
+
+/* live payload from subscribe('visibleRange') */
+.lp-rangeread {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lp-rangeread em {
+  font-style: normal;
+  color: var(--accent);
+  border: 1px solid rgba(38,166,154,0.3);
+  background: rgba(38,166,154,0.08);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+
+.lp-rdot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #2d3441;
+  flex-shrink: 0;
+}
+
+.lp-rdot-live {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(38,166,154,0.16);
+  animation: lp-rpulse 1s ease-in-out infinite;
+}
+
+@keyframes lp-rpulse {
+  50% { opacity: 0.35; }
 }
 
 /* ---- stats ---- */

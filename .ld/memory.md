@@ -109,8 +109,11 @@ Also available on demand as `chart.visibleRange()`.
   version is bumped in source but the registry still has 0.1.0, and the
   landing page now advertises annotations + range events
 - Visually confirm rendering + 60fps on emberwick.ldio.app (never eyeballed)
-- Landing page, markers and range events are built but NOT yet published to
-  the public URL
+- Landing page IS built into dist/ (annotations section + live visibleRange
+  readout under the hero chart, driven by the real event). Still needs the
+  editor's Publish button to reach the public URL.
+- dist/assets/ has ~10 stale hashed bundles from earlier builds; harmless,
+  but worth pruning sometime
 - OHLCV legend lives in the playground, NOT in the shipped package
 - Markers are not draggable (hover/click only)
 - Phase 4: indicators (SMA/EMA/VWAP/RSI/MACD) + multi-pane layout

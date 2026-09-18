@@ -9,9 +9,20 @@ const CDN_URL = 'https://unpkg.com/emberwick/umd/emberwick.umd.js'
  * The product demoing itself: a real chart instance, real feed, live.
  * Anything claimed in the copy below is visible right here.
  */
+/** Wall-clock span between the first and last visible bar. */
+function spanLabel(r) {
+  if (r.fromTime == null || r.toTime == null) return null
+  const mins = Math.round((r.toTime - r.fromTime) / 60000)
+  if (mins < 60) return `${mins}m on screen`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return `${h}h ${String(m).padStart(2, '0')}m on screen`
+}
+
 function HeroChart() {
   const hostRef = useRef(null)
   const [ready, setReady] = useState(false)
+  const [range, setRange] = useState(null)
 
   useEffect(() => {
     let disposed = false
@@ -28,10 +39,19 @@ function HeroChart() {
       ticksPerSecond: 10,
       speed: 40,
     })
+
+    // The readout below is the 'visibleRange' event, unfiltered: it is called
+    // once immediately with the current window and then only when that window
+    // really changes, so no debouncing is needed to drive React with it.
+    const offRange = chart.subscribe('visibleRange', (r) => {
+      if (!disposed) setRange(r)
+    })
+
     chart.setFeed(feed).then(() => { if (!disposed) setReady(true) })
 
     return () => {
       disposed = true
+      offRange()
       feed.destroy()
       chart.destroy()
     }
@@ -48,9 +68,19 @@ function HeroChart() {
       <div className="lp-chart" ref={hostRef}>
         {!ready && <div className="lp-chart-loading">generating market…</div>}
       </div>
-      <p className="lp-chart-hint">
-        drag to pan — throw it and it glides · wheel to zoom · double-click to reset
-      </p>
+      <div className="lp-chartfoot">
+        <p className="lp-chart-hint">
+          drag to pan — throw it and it glides · wheel to zoom · double-click to reset
+        </p>
+        {range && range.barCount > 0 && (
+          <span className="lp-rangeread" title="live payload from subscribe('visibleRange')">
+            <span className={range.settled ? 'lp-rdot' : 'lp-rdot lp-rdot-live'} />
+            bars {range.from}–{range.to} of {range.barCount}
+            <em>{range.spacing.toFixed(1)}px</em>
+            {spanLabel(range)}
+          </span>
+        )}
+      </div>
     </div>
   )
 }
