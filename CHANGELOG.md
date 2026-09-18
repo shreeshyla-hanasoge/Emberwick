@@ -3,6 +3,70 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-09-19
+
+Correctness release. Thirteen defects, most of them able to put wrong data on
+screen without raising anything. Minor rather than patch because two fixes
+change observable behaviour: markers outside the loaded range are now hidden,
+and `priceScale.marginBottom` finally does what it has always documented.
+
+### Fixed
+
+- **An out-of-order tick no longer destroys the newest bar.** `append()` routed
+  any bar at or before the last one into an in-place overwrite, so a late tick
+  deleted the newest candle and left a duplicate timestamp — breaking the
+  ascending-by-time invariant that marker resolution's binary search relies on.
+  Equal timestamps still replace (that is an idempotent re-send of the forming
+  candle); older ones are dropped.
+- **Timeframe is inferred from the median gap, not the first pair.** Any
+  exchange with a trading session puts a large gap at each day boundary; on NSE
+  minute data `bars[1] - bars[0]` across an overnight break reads as 17.75
+  hours. That number drove axis label density and Replay's future-marker
+  cut-off, so a bad inference could leak a future trade into playback.
+- **A null OHLC value no longer collapses the price scale.** `isFinite(null)`
+  is `true`, so a null low passed the guard and dragged the minimum to zero,
+  flattening every candle into the top of the plot.
+- **Log mode no longer collapses on a non-positive price.** A single zero tick
+  clamped to `1e-9` and turned the axis into a ~20-decade range.
+- **A throwing frame no longer freezes the chart permanently.** `Loop` swapped
+  the dirty set out before calling the frame, so one exception lost the pending
+  layers and left nothing to reschedule. The set is now restored and retried;
+  after ten consecutive failures the loop stops with a clear message rather
+  than spinning at 60fps.
+- **State-event dedupe is per listener.** `visibleRange` and `replay` shared a
+  single key, so a late subscriber recorded the current state as "already
+  sent" and every existing listener silently missed that update.
+- **A transient history error no longer disables paging for good.** One failed
+  page used to latch `_exhausted` permanently; it now retries and gives up
+  only after three consecutive failures.
+- **`Replay.seek()` ignores non-finite input.** `clamp()` compares with `<` and
+  `>`, both false against NaN, so `seek(NaN)` passed through and
+  `slice(0, NaN)` blanked the chart.
+- **A replaced replay controller can no longer drive the chart.** Calling
+  `startReplay()` twice left the first controller live in the caller's hands,
+  still able to swap bars into a chart that had moved on. Controllers are now
+  detached by `startReplay()`, `stopReplay()`, `setData()` and `destroy()`.
+- **Markers outside the loaded range are hidden rather than clamped.**
+  `nearestIndex()` clamps, so a trade from long before the window pinned itself
+  to bar 0 and read as an event at the left edge. Tolerance is one timeframe.
+- **`setData()` invalidates the marker index cache**, like every other bar-array
+  mutator already did.
+- **Generated marker ids no longer collide.** They were keyed off the array
+  index, so a remove-then-add could hand the newcomer an id a survivor owned,
+  and `removeMarker(id)` would take the wrong one.
+- **`priceTicks()` cannot hang.** A non-finite bound made the step fall back to
+  1 and the cursor start at `-Infinity`, where `v += step` never advances — an
+  infinite loop inside a frame.
+- **`priceScale.marginBottom` is read.** It was documented, typed and stored,
+  but both bounds were padded from `marginTop`. With the default settings
+  (0.12 / 0.12) nothing changes; only charts that set them differently move.
+
+### Added
+
+- `test/chart-correctness.test.mjs` — 18 cases; 17 fail against 0.4.2.
+- `inferTimeframe(bars, fallback)` exported from `core/Chart.js` for testing.
+- `Replay#detach()`.
+
 ## [0.4.2] — 2026-09-19
 
 Metadata only. The code is identical to 0.4.1; nothing needs re-testing.

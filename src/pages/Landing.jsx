@@ -601,7 +601,7 @@ export default function Landing() {
       {/* ---- hero ---- */}
       <section className="lp-hero">
         <span className="lp-pill">
-          <span className="lp-pulse" /> new in v{version} — replay scrubber
+          <span className="lp-pulse" /> new in v0.4.0 — replay scrubber
         </span>
         <h1>
           Candlestick charts that
@@ -650,7 +650,7 @@ export default function Landing() {
 
       {/* ---- replay ---- */}
       <section className="lp-section" id="replay">
-        <span className="lp-tag">new in v{version}</span>
+        <span className="lp-tag">new in v0.4.0</span>
         <h2>Rewind the tape</h2>
         <p className="lp-lede">
           Turn any dataset the chart already holds into playback: scrub it, step it
@@ -911,7 +911,7 @@ class MyFeed extends DataFeed {
       <section className="lp-section" id="roadmap">
         <h2>Where it's going</h2>
         <p className="lp-lede">
-          v{version} adds bar-by-bar replay on top of the annotation layer, range
+          v0.4.0 added bar-by-bar replay on top of the annotation layer, range
           events and the motion core. Honest about what isn't there yet — here's
           the order it's coming in.
         </p>

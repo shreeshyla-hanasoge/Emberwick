@@ -21,6 +21,14 @@ export const MARKER_SHAPES = [
 
 const SHAPE_SET = new Set(MARKER_SHAPES)
 
+/**
+ * Monotonic, so generated ids are unique for the life of the module. Keying
+ * them off the array index meant removing a marker and adding another handed
+ * the newcomer an id the survivor might already own, and removeMarker(id)
+ * would then take the wrong one.
+ */
+let autoId = 0
+
 /** Buys sit under the bar, sells over it — the convention traders expect. */
 const DEFAULT_POSITION = {
   arrowUp: 'belowBar',
@@ -31,6 +39,7 @@ const DEFAULT_POSITION = {
 
 const POSITIONS = new Set(['aboveBar', 'belowBar', 'inBar', 'atPrice'])
 
+// eslint-disable-next-line no-unused-vars
 export function normalizeMarker(raw, i) {
   if (!raw || !isFinite(raw.time)) return null
   const shape = SHAPE_SET.has(raw.shape) ? raw.shape : 'circle'
@@ -38,7 +47,7 @@ export function normalizeMarker(raw, i) {
     ? raw.position
     : DEFAULT_POSITION[shape] || 'aboveBar'
   return {
-    id: raw.id != null ? String(raw.id) : `mk${i}`,
+    id: raw.id != null ? String(raw.id) : `mk${++autoId}`,
     time: +raw.time,
     price: isFinite(raw.price) ? +raw.price : null,
     shape,
@@ -89,10 +98,24 @@ export function nearestIndex(bars, time) {
   return Math.abs(bars[a].time - time) <= Math.abs(bars[b].time - time) ? a : b
 }
 
-/** Attach a bar index to every marker, in place. */
-export function resolveMarkers(markers, bars) {
+/**
+ * Attach a bar index to every marker, in place.
+ *
+ * `toleranceMs` is how far outside the loaded range a marker may sit and
+ * still snap to the nearest end bar — one timeframe, normally. Beyond that it
+ * resolves to -1 and is not drawn. Without this, nearestIndex() clamps, so a
+ * trade from six months before the loaded window pins itself to bar 0 and
+ * reads as an event that happened at the left edge of the chart. Omit the
+ * argument for the old clamping behaviour.
+ */
+export function resolveMarkers(markers, bars, toleranceMs) {
+  const n = bars.length
+  const tol = isFinite(toleranceMs) && toleranceMs > 0 ? toleranceMs : Infinity
+  const first = n ? bars[0].time - tol : 0
+  const last = n ? bars[n - 1].time + tol : 0
   for (let i = 0; i < markers.length; i++) {
-    markers[i].index = nearestIndex(bars, markers[i].time)
+    const t = markers[i].time
+    markers[i].index = !n || t < first || t > last ? -1 : nearestIndex(bars, t)
   }
   return markers
 }

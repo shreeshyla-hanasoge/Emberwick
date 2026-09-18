@@ -31,6 +31,44 @@ const inactiveReplay = () => ({
  * touches nothing but DOM and Canvas, which is what lets the same core ship
  * as a React component, a Web Component, or a plain script tag.
  */
+/** Consecutive gaps sampled when inferring the timeframe. */
+const TF_SAMPLES = 200
+
+/**
+ * Consecutive failing history pages before paging gives up. One transient 500
+ * must not permanently disable lazy history, but a feed that is reliably
+ * failing must not be re-asked on every pan either.
+ */
+const MAX_HISTORY_ERRORS = 3
+
+/**
+ * Bar duration, taken as the MEDIAN gap between consecutive bars rather than
+ * simply `bars[1].time - bars[0].time`.
+ *
+ * Any exchange with a trading session puts a large gap between the last bar
+ * of one day and the first of the next — NSE closes at 15:30 and reopens at
+ * 09:15, so on minute data the very first pair can read as 17.75 HOURS. That
+ * one number then drives axis label density and, worse, Replay's future-marker
+ * cut-off. The median survives session breaks, weekends and holidays for as
+ * long as most bars are consecutive, which is the normal case.
+ *
+ * Gaps are sampled at a stride so a 500k-bar dataset costs the same as a
+ * small one, and each sample is still a genuine adjacent pair.
+ */
+export function inferTimeframe(bars, fallback = 60000) {
+  const n = bars.length
+  if (n < 2) return fallback
+  const stride = Math.max(1, Math.floor(n / TF_SAMPLES))
+  const gaps = []
+  for (let i = 1; i < n; i += stride) {
+    const d = bars[i].time - bars[i - 1].time
+    if (d > 0) gaps.push(d)
+  }
+  if (!gaps.length) return fallback
+  gaps.sort((a, b) => a - b)
+  return gaps[gaps.length >> 1]
+}
+
 export class Chart {
   constructor(container, options = {}) {
     if (!container) throw new Error('Chart: container element is required')
@@ -49,6 +87,7 @@ export class Chart {
     this._unsub = null
     this._loadingHistory = false
     this._exhausted = false
+    this._historyErrors = 0
     this._replay = null
     // Every async feed read is stamped with the generation current when it
     // STARTED. setFeed/detachFeed/destroy bump the counter, so a slow earlier
@@ -75,6 +114,10 @@ export class Chart {
     this._markerHits = []
     this._hoverMarkerId = null
     this._resolveKey = ''
+    // Per-listener dedupe. A single shared key let a LATE subscriber record
+    // the current state as "already sent", so the next emit compared equal
+    // and every EXISTING listener silently missed that update.
+    this._stateKeys = { visibleRange: new Map(), replay: new Map() }
 
     this.layers = new Layers(container, ['base', 'main', 'overlay'])
     this.ts = new TimeScale(options.timeScale)
@@ -110,11 +153,16 @@ export class Chart {
   // ------------------------------------------------------------------ data --
   setData(bars) {
     // New data means the dataset being replayed no longer exists.
-    if (this._replay) this._replay = null
+    if (this._replay) {
+      this._replay.detach()
+      this._replay = null
+    }
     this.bars = Array.isArray(bars) ? bars.slice() : []
     this._exhausted = false
+    this._historyErrors = 0
+    this._resolveKey = '' // new bars, so every marker index must re-resolve
     if (this.bars.length > 1) {
-      this.ts.timeframeMs = this.bars[1].time - this.bars[0].time
+      this.ts.timeframeMs = inferTimeframe(this.bars, this.ts.timeframeMs)
     }
     this.ts.setBarCount(this.bars.length)
     this.ts.snapToRealtime()
@@ -133,7 +181,7 @@ export class Chart {
   _swapBars(bars) {
     this.bars = Array.isArray(bars) ? bars : []
     if (this.bars.length > 1) {
-      this.ts.timeframeMs = this.bars[1].time - this.bars[0].time
+      this.ts.timeframeMs = inferTimeframe(this.bars, this.ts.timeframeMs)
     }
     this.ts.setBarCount(this.bars.length)
     this.live.reset()
@@ -155,11 +203,23 @@ export class Chart {
     this.loop.invalidate('main')
   }
 
-  /** Open a new candle; the previous one is now closed. */
+  /**
+   * Open a new candle; the previous one is now closed.
+   *
+   * A bar OLDER than the newest one is dropped rather than applied. It used
+   * to overwrite the last element — so a late tick silently deleted the
+   * newest candle and left a duplicate timestamp behind, which breaks the
+   * ascending-by-time invariant that marker resolution's binary search
+   * depends on. Feeds are documented as ascending and de-duplicated
+   * (data/DataFeed.js); this is the guard for the ones that are not.
+   */
   append(bar) {
     if (!bar) return
     const n = this.bars.length
-    if (n && bar.time <= this.bars[n - 1].time) {
+    if (n && bar.time < this.bars[n - 1].time) return
+    // Equal timestamps ARE a replace: that is an idempotent re-send of the
+    // forming candle, which is the common case on a chatty feed.
+    if (n && bar.time === this.bars[n - 1].time) {
       this.bars[n - 1] = bar
     } else {
       this.bars.push(bar)
@@ -213,6 +273,7 @@ export class Chart {
     // getBars() promise can be aborted, so instead they resolve into no-ops.
     this._feedGen++
     this._loadingHistory = false
+    this._historyErrors = 0
     if (this._unsub) this._unsub()
     this._unsub = null
     this.feed = null
@@ -256,6 +317,7 @@ export class Chart {
         this._exhausted = true
         return
       }
+      this._historyErrors = 0
       this.bars = added.concat(this.bars)
       // Keep the view pinned to the same bars: every index shifted right.
       // Smoothed.jump() writes BOTH value and target, so it alone pins the
@@ -268,7 +330,8 @@ export class Chart {
       this.loop.invalidate('all')
     } catch (err) {
       if (gen !== this._feedGen || this._destroyed) return
-      this._exhausted = true
+      // Retry on the next pan; latch only once the feed looks properly dead.
+      if (++this._historyErrors >= MAX_HISTORY_ERRORS) this._exhausted = true
       this._emitError(err, 'loadHistory')
     } finally {
       // Only the generation that owns the latch may release it, or a stale
@@ -488,17 +551,21 @@ export class Chart {
     // user to pan before it knows what is on screen.
     if (event === 'visibleRange') {
       const payload = this.visibleRange()
-      this._rangeKey = this._rangeIdentity(payload)
+      this._stateKeys.visibleRange.set(fn, this._rangeIdentity(payload))
       fn(payload)
     }
     // 'replay' is a state event for the same reason: a transport UI can render
     // itself from the first call instead of waiting for the first tick.
     if (event === 'replay') {
       const payload = this.replayState()
-      this._replayKey = this._replayIdentity(payload)
+      this._stateKeys.replay.set(fn, this._replayIdentity(payload))
       fn(payload)
     }
-    return () => set.delete(fn)
+    return () => {
+      set.delete(fn)
+      const keys = this._stateKeys[event]
+      if (keys) keys.delete(fn)
+    }
   }
 
   // ------------------------------------------------------------------ range --
@@ -540,13 +607,24 @@ export class Chart {
    *   work until the view stops moving would wait forever.
    */
   _emitVisibleRange(from, to) {
-    const set = this._listeners.visibleRange
+    this._emitState('visibleRange', this._rangePayload(from, to), this._rangeIdentity)
+  }
+
+  /**
+   * Deliver a state event to every listener that has not already seen this
+   * exact state. Keys are per-listener, so one subscriber can never suppress
+   * another's update, and a brand-new listener (no key yet) always gets one.
+   */
+  _emitState(event, payload, identity) {
+    const set = this._listeners[event]
     if (!set.size) return
-    const payload = this._rangePayload(from, to)
-    const key = this._rangeIdentity(payload)
-    if (key === this._rangeKey) return // undefined on the first frame, so it emits
-    this._rangeKey = key
-    for (const fn of set) fn(payload)
+    const key = identity.call(this, payload)
+    const keys = this._stateKeys[event]
+    for (const fn of set) {
+      if (keys.get(fn) === key) continue
+      keys.set(fn, key)
+      fn(payload)
+    }
   }
 
   // ----------------------------------------------------------------- replay --
@@ -581,6 +659,9 @@ export class Chart {
     // Snapshot BEFORE the controller starts swapping prefixes in, otherwise
     // the dataset would be the live array it is about to shorten.
     const dataset = source.slice()
+    // The caller still holds whatever the previous startReplay() returned;
+    // without detaching, its transport methods keep driving this chart.
+    if (this._replay) this._replay.detach()
     this._replay = new Replay(this, { ...options, bars: dataset })
     return this._replay
   }
@@ -589,6 +670,7 @@ export class Chart {
   stopReplay() {
     if (!this._replay) return
     const full = this._replay.source
+    this._replay.detach()
     this._replay = null
     this.setData(full) // snaps back to the right edge, like any fresh data
   }
@@ -613,13 +695,7 @@ export class Chart {
    * paused replay emits nothing at all.
    */
   _emitReplay() {
-    const set = this._listeners.replay
-    if (!set.size) return
-    const payload = this.replayState()
-    const key = this._replayIdentity(payload)
-    if (key === this._replayKey) return
-    this._replayKey = key
-    for (const fn of set) fn(payload)
+    this._emitState('replay', this.replayState(), this._replayIdentity)
   }
 
   // ----------------------------------------------------------- annotations --
@@ -718,7 +794,10 @@ export class Chart {
       const key =
         markers.length + ':' + this.bars.length + ':' + (this.bars.length ? this.bars[0].time : 0)
       if (key !== this._resolveKey) {
-        resolveMarkers(markers, this.bars)
+        // One timeframe of slack: a marker further outside the loaded range
+        // than that resolves to -1 and is hidden, rather than clamping onto
+        // the first or last bar as if it happened there.
+        resolveMarkers(markers, this.bars, this.ts.timeframeMs)
         this._resolveKey = key
       }
     }
@@ -801,6 +880,8 @@ export class Chart {
     this.loop.stop()
     this.layers.destroy()
     for (const set of Object.values(this._listeners)) set.clear()
+    for (const keys of Object.values(this._stateKeys)) keys.clear()
+    if (this._replay) this._replay.detach()
     this._replay = null
     this._markers = []
     this._markerHits = []

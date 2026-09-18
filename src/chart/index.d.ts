@@ -351,6 +351,12 @@ export declare class Replay {
   /** Clamped to 0.25–500. */
   setSpeed(speed: number): this
   setLoop(on: boolean): this
+  /**
+   * Stop this controller from ever touching the chart again. Called for you
+   * by startReplay(), stopReplay(), setData() and destroy(); a controller you
+   * are still holding after any of those is inert. Idempotent.
+   */
+  detach(): this
   /** Move the cursor. Out-of-range values clamp. */
   seek(index: number): this
   step(n?: number): this

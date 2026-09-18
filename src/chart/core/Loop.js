@@ -6,9 +6,17 @@
  * what keeps the loop running; otherwise it idles at zero CPU until something
  * calls invalidate().
  */
+
+/**
+ * Consecutive throwing frames tolerated before the loop gives up. A transient
+ * error should heal; a permanent one must not spin at 60fps forever.
+ */
+const MAX_FRAME_ERRORS = 10
+
 export class Loop {
   constructor(onFrame) {
     this.onFrame = onFrame
+    this._frameErrors = 0
     this.fps = 0
     this._raf = 0
     this._dirty = new Set()
@@ -63,7 +71,19 @@ export class Loop {
     let wantMore = false
     try {
       wantMore = this.onFrame(dirty, dt, now) === true
+      this._frameErrors = 0
     } catch (e) {
+      // The dirty set was swapped out before the call, so without putting it
+      // back a single throw loses the pending layers AND leaves wantMore
+      // false — nothing reschedules and the chart freezes for good.
+      for (const l of dirty) this._dirty.add(l)
+      if (++this._frameErrors >= MAX_FRAME_ERRORS) {
+        console.error(
+          `[Emberwick] frame error — stopping after ${MAX_FRAME_ERRORS} consecutive failures`, e)
+        this._dirty.clear()
+        this.stop()
+        return
+      }
       console.error('[Emberwick] frame error', e)
     }
     if (wantMore || this._dirty.size) this._schedule()

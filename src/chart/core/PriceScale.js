@@ -57,29 +57,48 @@ export class PriceScale {
     return this._inv(a + t * (b - a))
   }
 
+  /**
+   * Is this a price this scale can actually plot?
+   *
+   * `isFinite(null)` is TRUE — null numifies to 0 — so a bar carrying a null
+   * low used to sail through the old isFinite() guard and drag the minimum to
+   * zero, flattening every candle into the top of the plot. Log mode has the
+   * same problem from the other end: log(0) is -Infinity, and the clamp to
+   * 1e-9 turns one zero tick into a ~20-decade range.
+   */
+  _plottable(v) {
+    return typeof v === 'number' && isFinite(v) && (this.mode !== 'log' || v > 0)
+  }
+
   /** Fit visible bars. `extra` lets the forming candle influence the range. */
   fit(bars, from, to, extra) {
     if (!this.auto || !bars.length) return
     let min = Infinity
     let max = -Infinity
+    const consider = (lo, hi) => {
+      if (this._plottable(lo) && lo < min) min = lo
+      if (this._plottable(hi) && hi > max) max = hi
+    }
     for (let i = from; i <= to; i++) {
       const b = bars[i]
       if (!b) continue
-      if (b.low < min) min = b.low
-      if (b.high > max) max = b.high
+      consider(b.low, b.high)
     }
-    if (extra) {
-      if (extra.low < min) min = extra.low
-      if (extra.high > max) max = extra.high
-    }
+    if (extra) consider(extra.low, extra.high)
     if (!isFinite(min) || !isFinite(max)) return
 
     let a = this._fwd(min)
     let b = this._fwd(max)
-    let pad = (b - a) * this.marginTop
-    if (!(pad > 0)) pad = Math.abs(b) * 0.01 || 1
-    a -= pad
-    b += (b - a) * 0 + pad
+    // marginTop pads the high side, marginBottom the low side. They used to
+    // share one `pad` computed from marginTop, which made the documented and
+    // typed `marginBottom` option inert.
+    const span = b - a
+    let padTop = span * this.marginTop
+    let padBottom = span * this.marginBottom
+    if (!(padTop > 0)) padTop = Math.abs(b) * 0.01 || 1
+    if (!(padBottom > 0)) padBottom = Math.abs(a) * 0.01 || 1
+    a -= padBottom
+    b += padTop
 
     this._lo.set(a)
     this._hi.set(b)

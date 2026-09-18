@@ -46,6 +46,13 @@ export class Replay {
     this._acc = 0
     this._markerKey = ''
     this._markerView = null
+    /**
+     * A controller replaced by a second startReplay() is no longer ticked by
+     * the chart, but the caller still holds the object returned by the first
+     * call — and its transport methods would happily keep swapping bars into
+     * a chart that has moved on. Detaching neuters it.
+     */
+    this._detached = false
 
     // The scales infer the timeframe from the first PAIR of bars, so two bars
     // is the floor — the cursor never goes below index 1.
@@ -93,8 +100,15 @@ export class Replay {
   }
 
   // ------------------------------------------------------------- transport --
+  /** Stop this controller from ever touching the chart again. Idempotent. */
+  detach() {
+    this._detached = true
+    this.playing = false
+    return this
+  }
+
   play() {
-    if (this.playing || this.length < 2) return this
+    if (this._detached || this.playing || this.length < 2) return this
     // Pressing play at the end restarts, rather than doing nothing.
     if (this.atEnd) {
       this.index = this.minIndex
@@ -134,8 +148,13 @@ export class Replay {
 
   /** Move the cursor. Out-of-range values clamp; playback keeps running. */
   seek(index) {
-    const next = clamp(Math.round(+index), this.minIndex, this.lastIndex)
-    if (next === this.index) return this
+    const n = Math.round(+index)
+    // clamp() compares with < and >, and every comparison against NaN is
+    // false, so NaN passes straight through and slice(0, NaN) blanks the
+    // chart. Every other numeric entry point here is already defensive.
+    if (!Number.isFinite(n)) return this
+    const next = clamp(n, this.minIndex, this.lastIndex)
+    if (this._detached || next === this.index) return this
     this.index = next
     this._acc = 0
     this._apply('seek')
@@ -152,7 +171,7 @@ export class Replay {
    * true while playback is in flight, which is what keeps the loop awake.
    */
   tick(dt) {
-    if (!this.playing || this.length < 2) return false
+    if (this._detached || !this.playing || this.length < 2) return false
 
     this._acc += dt * this.speed
     const steps = Math.floor(this._acc / this.baseInterval)
@@ -217,6 +236,9 @@ export class Replay {
    * animates; anything else swaps the prefix and re-anchors without easing.
    */
   _apply(mode) {
+    // The single gate on touching the chart: a detached controller must not
+    // swap bars underneath whatever replaced it.
+    if (this._detached) return
     const chart = this.chart
     if (mode === 'step' && chart.bars.length === this.index) {
       chart.append(this.source[this.index])
@@ -228,6 +250,7 @@ export class Replay {
 
   /** Any state change needs a frame: that frame is what emits 'replay'. */
   _changed() {
+    if (this._detached) return
     this.chart.loop.invalidate('main')
   }
 }

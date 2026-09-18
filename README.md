@@ -114,8 +114,15 @@ One contract, used everywhere:
 }
 ```
 
-Bars must be **ascending by time** and **de-duplicated**. The chart infers the
-timeframe from the gap between the first two bars (or from `feed.timeframe`).
+Bars must be **ascending by time** and **de-duplicated**. A bar older than the
+newest one is dropped rather than applied — an out-of-order tick would
+otherwise overwrite the newest candle and leave a duplicate timestamp behind.
+
+The chart infers the timeframe from the **median** gap between consecutive
+bars, sampled across the dataset (or takes it from `feed.timeframe`). The
+median rather than the first pair, because any exchange with a trading session
+puts a large gap at each day boundary — on NSE minute data, `bars[1] - bars[0]`
+across an overnight break reads as 17.75 hours.
 
 ---
 
@@ -422,6 +429,11 @@ chart.subscribe('markerClick', (m) => openTicket(m.data.orderId))
 A marker is pinned to a **timestamp**, not a bar index, and resolves to the
 nearest bar. Load an older page of history and every marker re-resolves, so
 nothing drifts off its candle.
+
+A marker more than one timeframe outside the loaded range is **hidden**, not
+clamped to the end bar. A trade from six months before the loaded window is
+not an event that happened at the left edge of the chart, and drawing it there
+is worse than not drawing it at all. Page that history in and it appears.
 
 | Field | Default | Notes |
 |---|---|---|

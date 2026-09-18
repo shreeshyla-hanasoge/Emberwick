@@ -8,11 +8,23 @@ export function niceStep(span, count) {
   return s * mag
 }
 
+/** Hard ceiling on tick count — a guard, never reached by a sane range. */
+const MAX_TICKS = 1000
+
 export function priceTicks(lo, hi, count) {
   const step = niceStep(hi - lo, count)
-  const ticks = []
+  // A non-finite bound makes niceStep fall back to 1 and `start` become
+  // -Infinity, and `v += step` never moves off -Infinity: the loop below
+  // would spin forever inside a frame. Bail instead.
+  if (!isFinite(lo) || !isFinite(hi) || hi < lo) return { ticks: [], step }
   const start = Math.ceil(lo / step) * step
-  for (let v = start; v <= hi + step * 1e-9; v += step) ticks.push(v)
+  const ticks = []
+  // Multiply rather than accumulate: repeated += step drifts on floats.
+  for (let i = 0; i < MAX_TICKS; i++) {
+    const v = start + i * step
+    if (v > hi + step * 1e-9) break
+    ticks.push(v)
+  }
   return { ticks, step }
 }
 
