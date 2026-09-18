@@ -1,0 +1,24 @@
+{
+  "name": "emberwick",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:lib": "vite build --config vite.lib.config.js",
+    "build:umd": "vite build --config vite.umd.config.js",
+    "pack:lib": "node scripts/pack-lib.mjs",
+    "size": "node scripts/check-size.mjs",
+    "release": "npm run build:lib && npm run build:umd && npm run pack:lib && npm run size"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
+    "vite": "^5.4.0"
+  }
+}

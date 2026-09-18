@@ -1,0 +1,56 @@
+{
+  "name": "emberwick",
+  "version": "0.2.0",
+  "description": "Smooth flowing candlestick charts for the web — canvas-rendered, zero-dependency, pluggable data feeds.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": [
+    "./webcomponent.js"
+  ],
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "unpkg": "./umd/emberwick.umd.js",
+  "jsdelivr": "./umd/emberwick.umd.js",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./react": {
+      "types": "./react.d.ts",
+      "import": "./react.js"
+    },
+    "./webcomponent": {
+      "types": "./webcomponent.d.ts",
+      "import": "./webcomponent.js"
+    },
+    "./umd": "./umd/emberwick.umd.js",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "react": ">=17"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "candlestick",
+    "chart",
+    "charting",
+    "financial",
+    "trading",
+    "ohlc",
+    "canvas",
+    "realtime",
+    "tradingview-alternative"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
