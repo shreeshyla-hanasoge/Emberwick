@@ -101,6 +101,16 @@ export class TimeScale {
     this._right.set(this.barCount - 1 + this.rightOffset)
   }
 
+  /**
+   * Same anchor, no easing. Scrubbing re-targets the right edge many times a
+   * second; easing each one reads as the chart lagging the scrubber, which is
+   * the same reason a drag uses jump().
+   */
+  jumpToRealtime() {
+    this.follow = true
+    this._right.jump(this.barCount - 1 + this.rightOffset)
+  }
+
   reset() {
     this._spacing.set(this._initial)
     this.snapToRealtime()

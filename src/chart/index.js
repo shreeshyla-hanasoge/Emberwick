@@ -17,6 +17,7 @@ export { RandomFeed } from './data/RandomFeed.js'
 export { Smoothed, Tween, easeOutCubic, easeInOutCubic } from './motion/Tween.js'
 export { Inertia } from './motion/Inertia.js'
 export { LiveCandle } from './motion/LiveCandle.js'
+export { Replay, MIN_SPEED, MAX_SPEED } from './replay/Replay.js'
 
 import { Chart } from './core/Chart.js'
 
@@ -25,5 +26,5 @@ export function createChart(container, options) {
   return new Chart(container, options)
 }
 
-export const version = '0.3.0'
+export const version = '0.4.0'
 

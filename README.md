@@ -225,6 +225,10 @@ const chart = createChart(el, {
 | `setAnimate(bool)` | Toggle live-candle easing |
 | `setMagnet(bool)` | Toggle crosshair OHLC snapping |
 | `snapToRealtime()` | Jump back to the newest bar and re-enable autoscale |
+| `startReplay(options?)` | Begin bar-by-bar playback. Returns the `Replay`, or `null` if there is nothing to replay |
+| `stopReplay()` | Leave replay and reveal the whole dataset again |
+| `replayState()` | Current playback state. `{ active: false, ... }` when not replaying |
+| `chart.replay` | Getter — the active `Replay` controller, or `null` |
 | `toImage()` | PNG data URL of the composited layers |
 | `destroy()` | Remove listeners, stop the loop, drop canvases |
 | `chart.fps` | Getter — measured frames per second |
@@ -248,6 +252,7 @@ off()  // unsubscribe
 | `'markerHover'` | The marker under the pointer, or `null` when none is |
 | `'markerClick'` | The clicked marker. Only fires on a hit, never with `null` |
 | `'visibleRange'` | `{ from, to, fromTime, toTime, barCount, spacing, settled }` |
+| `'replay'` | `{ active, playing, index, length, progress, speed, time, bar, atEnd }` |
 
 A drag that happens to end on top of a marker does not fire `'markerClick'` —
 panning and clicking stay distinct.
@@ -286,6 +291,84 @@ payload on demand if you would rather poll than subscribe.
 > The chart also paginates backwards **on its own** through
 > `feed.getBars({ to })` whenever you have attached a feed. This event is for
 > when you want to drive that yourself, or to drive something other than data.
+
+---
+
+## Replay
+
+Play a fixed dataset back bar by bar — backtesting playback, a market-open
+recap, a training drill.
+
+```js
+chart.setData(bars)
+
+const replay = chart.startReplay({ from: 200, speed: 4 })
+replay.play()
+
+chart.subscribe('replay', (s) => {
+  scrubber.value = s.index
+  clock.textContent = new Date(s.time).toLocaleTimeString()
+  if (s.atEnd) playBtn.textContent = 'Restart'
+})
+```
+
+The chart is never put into a special mode. The controller keeps the dataset
+aside and hands the chart only the **revealed prefix**, so scales, crosshair,
+annotations and `'visibleRange'` behave exactly as they do on live data that
+happens to end at the cursor.
+
+Revealing the next bar goes through the same path a feed tick takes, so the
+candle grows in and the axis glides. Scrubbing swaps the prefix and jumps —
+easing a scrub would read as lag, the same rule the pan gesture follows.
+
+### `chart.startReplay(options?)`
+
+| Option | Default | Notes |
+|---|---|---|
+| `bars` | the chart's current bars | The dataset to replay. Never mutated |
+| `from` | midpoint | Starting cursor index |
+| `speed` | `1` | Multiplier, clamped to `0.25`–`500` |
+| `baseInterval` | `1000` | Real ms one bar takes at 1× |
+| `loop` | `false` | Restart at the end instead of stopping |
+| `follow` | `true` | Re-anchor the right edge on the cursor when scrubbing |
+
+Returns the `Replay`, or `null` when there are fewer than two bars. While a
+replay is active an attached feed is ignored, so live ticks cannot fight the
+cursor; `stopReplay()` restores the full dataset and resumes normal service.
+
+### Transport
+
+Every method returns the controller, so calls chain.
+
+| Method | Description |
+|---|---|
+| `play()` / `pause()` / `toggle()` | Pressing play at the end restarts from the beginning |
+| `seek(index)` | Move the cursor. Out-of-range values clamp |
+| `step(n = 1)` | Relative move; `step(-1)` goes back a bar |
+| `toStart()` / `toEnd()` | Jump to either end |
+| `setSpeed(x)` | Clamped to `0.25`–`500`. Never bursts bars on a rate change |
+| `setLoop(bool)` | Toggle looping |
+
+Readable state: `index`, `length`, `progress` (0–1), `speed`, `time`, `bar`,
+`atEnd`, `playing`, and `interval` (real ms between bars at the current
+speed).
+
+### The `'replay'` event
+
+`{ active, playing, index, length, progress, speed, time, bar, atEnd }`.
+
+Like `'visibleRange'` it is a **state** event: a new subscriber is called
+immediately, and after `stopReplay()` it fires once with `active: false` so a
+UI can reset itself without special-casing teardown. `chart.replayState()`
+returns the same payload on demand.
+
+**Markers after the cursor are hidden, not clamped.** Time→index resolution
+snaps to the nearest bar, so without that filter every future trade would pile
+onto the newest revealed candle — and a replay that shows you tomorrow's
+entries is worse than no replay at all.
+
+The cursor never goes below index 1: the scales infer the timeframe from the
+first pair of bars.
 
 ---
 
@@ -566,6 +649,7 @@ import {
   TimeScale, PriceScale,        // scales (advanced)
   Smoothed, Tween, Inertia,     // motion primitives
   LiveCandle,
+  Replay, MIN_SPEED, MAX_SPEED, // bar-by-bar playback
   easeOutCubic, easeInOutCubic,
   mulberry32,                   // seeded PRNG
   version,

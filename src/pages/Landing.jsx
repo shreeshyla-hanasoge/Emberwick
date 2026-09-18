@@ -239,6 +239,135 @@ function MarkersChart() {
   )
 }
 
+/* ---------------------------------------------------------------- replay -- */
+/**
+ * The scrubber demoing itself. A fixed 420-bar dataset is replayed from its
+ * midpoint at 4×; every control below is wired straight to `chart.replay`,
+ * and every number shown arrives on the 'replay' event — nothing polls.
+ *
+ * Markers are placed across the WHOLE dataset on purpose: the ones ahead of
+ * the cursor stay hidden until playback reaches them.
+ */
+const REPLAY_SPEEDS = [1, 4, 20, 100]
+
+function ReplayChart() {
+  const hostRef = useRef(null)
+  const chartRef = useRef(null)
+  const [ready, setReady] = useState(false)
+  const [rp, setRp] = useState(null)
+
+  useEffect(() => {
+    let disposed = false
+    let off = null
+    const chart = createChart(hostRef.current, {
+      theme: { ...defaultTheme, background: '#0a0d15' },
+      timeScale: { spacing: 6, rightOffset: 8 },
+    })
+    chartRef.current = chart
+
+    const feed = new RandomFeed({
+      symbol: 'EMBR',
+      timeframe: 60000,
+      seed: 31337,
+      start: 96.2,
+      volatility: 0.0024,
+    })
+
+    feed
+      .getBars({ symbol: 'EMBR', timeframe: 60000, to: null, limit: 420 })
+      .then((bars) => {
+        if (disposed || !bars.length) return
+        chart.setData(bars)
+
+        const n = bars.length
+        const at = (f) => bars[Math.max(0, Math.min(n - 1, Math.round(f * (n - 1))))]
+        chart.setMarkers([
+          { id: 'r1', time: at(0.3).time, shape: 'arrowUp', text: 'BUY' },
+          { id: 'r2', time: at(0.52).time, shape: 'flag', color: '#c084fc', text: 'News' },
+          { id: 'r3', time: at(0.74).time, shape: 'arrowDown', text: 'SELL' },
+          { id: 'r4', time: at(0.93).time, shape: 'arrowUp', text: 'BUY' },
+        ])
+
+        off = chart.subscribe('replay', (s) => { if (!disposed) setRp(s) })
+        chart.startReplay({ from: Math.round(n * 0.45), speed: 4 })
+        chart.replay.play()
+        setReady(true)
+      })
+
+    return () => {
+      disposed = true
+      if (off) off()
+      chart.destroy()
+      chartRef.current = null
+    }
+  }, [])
+
+  const on = (fn) => () => {
+    const r = chartRef.current && chartRef.current.replay
+    if (r) fn(r)
+  }
+  const active = !!(rp && rp.active)
+
+  return (
+    <div className="lp-replaychart">
+      <div className="lp-chartwrap">
+        <div className="lp-chartbar">
+          <span className="lp-dot lp-dot-a" />
+          <span className="lp-dot lp-dot-b" />
+          <span className="lp-dot lp-dot-c" />
+          <span className="lp-chartbar-title">EMBR · 1m · replaying 420 bars</span>
+        </div>
+        <div className="lp-chart lp-chart-sm" ref={hostRef}>
+          {!ready && <div className="lp-chart-loading">loading the tape…</div>}
+        </div>
+      </div>
+
+      <div className="lp-transport">
+        <div className="lp-tbtns">
+          <button className="lp-tbtn" title="To start" onClick={on((r) => r.toStart())}>⏮</button>
+          <button className="lp-tbtn" title="Back one bar" onClick={on((r) => r.step(-1))}>◀</button>
+          <button
+            className={`lp-tbtn ${active && rp.playing ? 'is-on' : ''}`}
+            title={active && rp.playing ? 'Pause' : 'Play'}
+            onClick={on((r) => r.toggle())}
+          >
+            {active && rp.playing ? '❚❚' : '▶'}
+          </button>
+          <button className="lp-tbtn" title="Forward one bar" onClick={on((r) => r.step(1))}>▶|</button>
+          <button className="lp-tbtn" title="To end" onClick={on((r) => r.toEnd())}>⏭</button>
+        </div>
+
+        <div className="lp-rpscrub">
+          <input
+            type="range"
+            min="1"
+            max={active ? Math.max(1, rp.length - 1) : 1}
+            value={active ? rp.index : 1}
+            onChange={(e) => on((r) => r.seek(+e.target.value))()}
+            aria-label="Replay position"
+          />
+        </div>
+
+        <div className="lp-tbtns">
+          {REPLAY_SPEEDS.map((s) => (
+            <button
+              key={s}
+              className={`lp-tbtn ${active && rp.speed === s ? 'is-on' : ''}`}
+              onClick={on((r) => r.setSpeed(s))}
+            >
+              {s}×
+            </button>
+          ))}
+        </div>
+
+        <span className="lp-rpread">
+          {active ? <>bar <b>{rp.index + 1}</b> / {rp.length}</> : 'idle'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 /* ------------------------------------------------------------------ copy -- */
 function CopyLine({ text }) {
   const [copied, setCopied] = useState(false)
@@ -283,6 +412,10 @@ const FEATURES = [
   {
     t: 'Markers & annotations',
     d: 'Nine marker shapes, price lines and shaded zones. Markers sharing a bar stack instead of overlapping, dense sets thin out as you zoom away, and each one is hit-tested for hover and click with your own payload attached.',
+  },
+  {
+    t: 'Replay built in',
+    d: 'startReplay() turns any loaded dataset into a tape you can scrub, step and play at 0.25×–500×. Bars are revealed through the same animated path a live tick takes, so backtesting playback looks exactly like the market did.',
   },
   {
     t: 'Any data source',
@@ -434,10 +567,10 @@ function RangeChart() {
 }
 
 const ROADMAP = [
-  { t: 'Replay scrubber', d: 'Step history bar-by-bar at 1×–500× — backtesting playback, built on the motion engine.', next: true },
-  { t: 'Indicators & panes', d: 'SMA, EMA, VWAP, RSI, MACD in resizable sub-panes, plus a plugin hook for your own.' },
+  { t: 'Indicators & panes', d: 'SMA, EMA, VWAP, RSI, MACD in resizable sub-panes, plus a plugin hook for your own.', next: true },
   { t: 'Drawing tools', d: 'Trendlines, Fibonacci, position tool — with hit-testing, undo/redo and serialisable state.' },
   { t: 'Chart-type morphing', d: 'Animate candlestick → Heikin-Ashi → line as an eased transition rather than a redraw.' },
+  { t: 'Session gaps', d: 'Collapse weekends and closed sessions instead of rendering them as ordinary bar steps.' },
 ]
 
 /* --------------------------------------------------------------- landing -- */
@@ -455,6 +588,7 @@ export default function Landing() {
         </a>
         <nav className="lp-navlinks">
           <a href="#features">Features</a>
+          <a href="#replay">Replay</a>
           <a href="#annotations">Annotations</a>
           <a href="#range">Range events</a>
           <a href="#usage">Usage</a>
@@ -467,7 +601,7 @@ export default function Landing() {
       {/* ---- hero ---- */}
       <section className="lp-hero">
         <span className="lp-pill">
-          <span className="lp-pulse" /> new in v{version} — annotations &amp; range events
+          <span className="lp-pulse" /> new in v{version} — replay scrubber
         </span>
         <h1>
           Candlestick charts that
@@ -514,9 +648,72 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* ---- replay ---- */}
+      <section className="lp-section" id="replay">
+        <span className="lp-tag">new in v{version}</span>
+        <h2>Rewind the tape</h2>
+        <p className="lp-lede">
+          Turn any dataset the chart already holds into playback: scrub it, step it
+          bar-by-bar, or run it at 100×. The transport under this chart is wired to
+          nothing but the public API — press play, or drag the scrubber.
+        </p>
+
+        <div className="lp-replaygrid">
+          <ReplayChart />
+
+          <div className="lp-code lp-annocode">
+            <div className="lp-codehead">Driving playback</div>
+            <pre>{`// any dataset the chart already holds
+chart.startReplay({ from: 180, speed: 4 })
+chart.replay.play()
+
+// a state event, like visibleRange: called on subscribe,
+// then only when the cursor or transport actually moves
+chart.subscribe('replay', (s) => {
+  label.textContent = \`\${s.index + 1} / \${s.length}\`
+  scrubber.value = s.index
+  if (s.atEnd) stopwatch.stop()
+})
+
+scrubber.oninput = (e) => chart.replay.seek(+e.target.value)
+
+chart.replay.step(-1)     // one bar back
+chart.replay.setSpeed(20) // 0.25× – 500×
+chart.stopReplay()        // back to the full dataset`}</pre>
+          </div>
+        </div>
+
+        <div className="lp-annofacts">
+          <div className="lp-annofact">
+            <h3>Not a second chart</h3>
+            <p>
+              The chart is simply handed the revealed prefix of your data, so the
+              scales, crosshair, annotations and <code>visibleRange</code> keep
+              behaving exactly as they do live. There is no replay mode to
+              special-case.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>It plays, it doesn&rsquo;t flick</h3>
+            <p>
+              Each revealed bar takes the same animated path a live tick does —
+              grow-from-centre, eased axis, gliding time scale. Scrubbing jumps
+              instead, because easing a drag reads as lag.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>The future stays hidden</h3>
+            <p>
+              Markers past the cursor are not drawn until playback reaches them,
+              so a backtest never shows you the trade you haven&rsquo;t taken yet.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* ---- annotations ---- */}
       <section className="lp-section" id="annotations">
-        <span className="lp-tag">new in v{version}</span>
+        <span className="lp-tag">v0.3.0</span>
         <h2>Mark up the chart</h2>
         <p className="lp-lede">
           Trades, events, targets and bands — three calls, no extra layer to manage.
@@ -585,7 +782,7 @@ chart.subscribe('markerClick', (m) => openTicket(m.data.orderId))`}</pre>
 
       {/* ---- range events ---- */}
       <section className="lp-section" id="range">
-        <span className="lp-tag">new in v{version}</span>
+        <span className="lp-tag">v0.3.0</span>
         <h2>Know what&rsquo;s on screen</h2>
         <p className="lp-lede">
           One subscription reports the window the user is actually looking at —
@@ -714,8 +911,8 @@ class MyFeed extends DataFeed {
       <section className="lp-section" id="roadmap">
         <h2>Where it's going</h2>
         <p className="lp-lede">
-          v{version} adds the annotation layer and range events on top of the
-          rendering and motion core. Honest about what isn't there yet — here's
+          v{version} adds bar-by-bar replay on top of the annotation layer, range
+          events and the motion core. Honest about what isn't there yet — here's
           the order it's coming in.
         </p>
         <div className="lp-road">

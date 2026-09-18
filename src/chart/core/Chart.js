@@ -5,11 +5,25 @@ import { PriceScale } from './PriceScale.js'
 import { defaultTheme } from './palette.js'
 import { LiveCandle } from '../motion/LiveCandle.js'
 import { Inertia } from '../motion/Inertia.js'
+import { Replay } from '../replay/Replay.js'
 import { drawGrid } from '../render/grid.js'
 import { drawCandles } from '../render/candles.js'
 import { drawCrosshair } from '../render/crosshair.js'
 import { drawZones, drawPriceLines, drawMarkers } from '../render/annotations.js'
 import { normalizeMarkers, resolveMarkers, layoutMarkers } from '../overlays/annotations.js'
+
+/** The 'replay' payload when nothing is being replayed. */
+const inactiveReplay = () => ({
+  active: false,
+  playing: false,
+  index: -1,
+  length: 0,
+  progress: 0,
+  speed: 1,
+  time: null,
+  bar: null,
+  atEnd: false,
+})
 
 /**
  * Chart — the orchestrator. Owns the bar store, the scales, the input
@@ -35,11 +49,13 @@ export class Chart {
     this._unsub = null
     this._loadingHistory = false
     this._exhausted = false
+    this._replay = null
     this._listeners = {
       crosshair: new Set(),
       visibleRange: new Set(),
       markerClick: new Set(),
       markerHover: new Set(),
+      replay: new Set(),
     }
 
     // ---- annotations --------------------------------------------------
@@ -86,6 +102,8 @@ export class Chart {
 
   // ------------------------------------------------------------------ data --
   setData(bars) {
+    // New data means the dataset being replayed no longer exists.
+    if (this._replay) this._replay = null
     this.bars = Array.isArray(bars) ? bars.slice() : []
     this._exhausted = false
     if (this.bars.length > 1) {
@@ -95,6 +113,24 @@ export class Chart {
     this.ts.snapToRealtime()
     this.live.reset()
     this.ps._primed = false
+    this.loop.invalidate('all')
+  }
+
+  /**
+   * Replace the bar array WITHOUT re-anchoring the view — the deliberate
+   * difference from setData(), which snaps to the right edge and re-primes
+   * the price scale. Replay swaps its revealed prefix through here on every
+   * scrub, so a snap would fight the user's zoom and the price scale would
+   * pop instead of easing between windows.
+   */
+  _swapBars(bars) {
+    this.bars = Array.isArray(bars) ? bars : []
+    if (this.bars.length > 1) {
+      this.ts.timeframeMs = this.bars[1].time - this.bars[0].time
+    }
+    this.ts.setBarCount(this.bars.length)
+    this.live.reset()
+    this._resolveKey = '' // the prefix changed length: every index re-resolves
     this.loop.invalidate('all')
   }
 
@@ -141,6 +177,8 @@ export class Chart {
     if (typeof feed.prime === 'function') feed.prime(bars[bars.length - 1])
     this._unsub = feed.subscribe((msg) => {
       if (!msg || !msg.bar) return
+      // During replay the feed is the FUTURE arriving: let it run, ignore it.
+      if (this._replay) return
       if (msg.type === 'append') this.append(msg.bar)
       else this.update(msg.bar)
     })
@@ -153,6 +191,9 @@ export class Chart {
   }
 
   async _maybeLoadHistory() {
+    // Replay owns the bar array; a page prepended underneath it would
+    // renumber the cursor mid-playback.
+    if (this._replay) return
     if (this._loadingHistory || this._exhausted || !this.feed) return
     const { from } = this.ts.visibleRange()
     if (from > 80 || !this.bars.length) return
@@ -392,6 +433,13 @@ export class Chart {
       this._rangeKey = this._rangeIdentity(payload)
       fn(payload)
     }
+    // 'replay' is a state event for the same reason: a transport UI can render
+    // itself from the first call instead of waiting for the first tick.
+    if (event === 'replay') {
+      const payload = this.replayState()
+      this._replayKey = this._replayIdentity(payload)
+      fn(payload)
+    }
     return () => set.delete(fn)
   }
 
@@ -443,11 +491,85 @@ export class Chart {
     for (const fn of set) fn(payload)
   }
 
+  // ----------------------------------------------------------------- replay --
+  /**
+   * Start bar-by-bar playback over a fixed dataset.
+   *
+   * With no `bars`, the chart's CURRENT data becomes the dataset — the usual
+   * case: load history, then replay it. The chart is not switched into a
+   * special mode; it is simply handed the revealed prefix, so scales,
+   * annotations, the crosshair and visibleRange all keep behaving normally.
+   *
+   *   chart.startReplay({ from: 200, speed: 4 })
+   *   chart.replay.play()
+   *
+   * @param {object} [options]
+   * @param {Bar[]} [options.bars]          dataset (defaults to current bars)
+   * @param {number} [options.from]         starting index (default: midpoint)
+   * @param {number} [options.speed]        rate multiplier, 0.25–500
+   * @param {number} [options.baseInterval] real ms per bar at 1× (default 1000)
+   * @param {boolean} [options.loop]        restart at the end
+   * @param {boolean} [options.follow]      re-anchor the right edge on scrub
+   * @returns {Replay|null} null if there are fewer than two bars to replay
+   */
+  startReplay(options = {}) {
+    const source =
+      Array.isArray(options.bars) && options.bars.length
+        ? options.bars
+        : this._replay
+          ? this._replay.source
+          : this.bars
+    if (!source || source.length < 2) return null
+    // Snapshot BEFORE the controller starts swapping prefixes in, otherwise
+    // the dataset would be the live array it is about to shorten.
+    const dataset = source.slice()
+    this._replay = new Replay(this, { ...options, bars: dataset })
+    return this._replay
+  }
+
+  /** Leave replay and reveal the whole dataset again. */
+  stopReplay() {
+    if (!this._replay) return
+    const full = this._replay.source
+    this._replay = null
+    this.setData(full) // snaps back to the right edge, like any fresh data
+  }
+
+  /** The active controller, or null. */
+  get replay() {
+    return this._replay
+  }
+
+  /** Current playback state; `{ active: false, ... }` when not replaying. */
+  replayState() {
+    return this._replay ? this._replay.state() : inactiveReplay()
+  }
+
+  _replayIdentity(p) {
+    return `${p.active ? 1 : 0}:${p.playing ? 1 : 0}:${p.index}:${p.length}:${p.speed}`
+  }
+
+  /**
+   * Emitted from the frame, like visibleRange, so a handler can safely touch
+   * the chart. Keyed on cursor + transport, not on the payload object, so a
+   * paused replay emits nothing at all.
+   */
+  _emitReplay() {
+    const set = this._listeners.replay
+    if (!set.size) return
+    const payload = this.replayState()
+    const key = this._replayIdentity(payload)
+    if (key === this._replayKey) return
+    this._replayKey = key
+    for (const fn of set) fn(payload)
+  }
+
   // ----------------------------------------------------------- annotations --
   /** Replace every marker. Each `time` is resolved to its nearest bar. */
   setMarkers(markers) {
     this._markers = normalizeMarkers(markers)
     this._resolveKey = '' // force re-resolution on the next frame
+    if (this._replay) this._replay.invalidateMarkers()
     this.loop.invalidate('main')
   }
 
@@ -485,6 +607,11 @@ export class Chart {
   _frame(dirty, dt) {
     let animating = false
 
+    // First: replay may append or swap bars, and everything below reads them.
+    // It returns true while playing, which both keeps the loop awake and
+    // forces the full redraw the newly revealed bar needs.
+    if (this._replay && this._replay.tick(dt)) animating = true
+
     if (this.ts.tick(dt)) animating = true
 
     const dx = this.inertia.tick(dt)
@@ -521,12 +648,19 @@ export class Chart {
       zones: this.zones,
     }
 
+    // Markers past the replay cursor are future information — hidden, not
+    // clamped, because time→index resolution snaps to the NEAREST bar and
+    // would otherwise pile them all onto the newest revealed candle.
+    let markers = this._markers
+    if (this._replay && markers.length) markers = this._replay.markerFilter(markers)
+
     // Marker indices only go stale when the bar array shifts: a prepended
     // history page renumbers every bar, an append does not.
-    if (this._markers.length) {
-      const key = this.bars.length + ':' + (this.bars.length ? this.bars[0].time : 0)
+    if (markers.length) {
+      const key =
+        markers.length + ':' + this.bars.length + ':' + (this.bars.length ? this.bars[0].time : 0)
       if (key !== this._resolveKey) {
-        resolveMarkers(this._markers, this.bars)
+        resolveMarkers(markers, this.bars)
         this._resolveKey = key
       }
     }
@@ -539,7 +673,7 @@ export class Chart {
       this._markerHits = drawMarkers(
         this.layers.ctx.main,
         state,
-        layoutMarkers(this._markers, state),
+        layoutMarkers(markers, state),
         this._hoverMarkerId,
       )
     }
@@ -551,6 +685,7 @@ export class Chart {
     // setData() or setMarkers(), and by this point the renderers have
     // finished reading the state it would mutate.
     this._emitVisibleRange(from, to)
+    this._emitReplay()
 
     return animating
   }
@@ -604,6 +739,7 @@ export class Chart {
     this.loop.stop()
     this.layers.destroy()
     for (const set of Object.values(this._listeners)) set.clear()
+    this._replay = null
     this._markers = []
     this._markerHits = []
     this.priceLines = []

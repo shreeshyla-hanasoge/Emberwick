@@ -104,12 +104,35 @@ Also available on demand as `chart.visibleRange()`.
 - Times are in the key, so a prepended history page re-emits even though
   `from` stays 0.
 
+## Replay scrubber (v0.4.0, in source — NOT yet on npm)
+`src/chart/replay/Replay.js` — bar-by-bar playback over a fixed dataset.
+- NO "replay mode" in the chart. The controller holds the dataset aside and
+  hands the chart only the REVEALED PREFIX, so scales, crosshair, annotations
+  and visibleRange behave as they do on live data ending at the cursor.
+- Advancing exactly ONE bar goes through `chart.append()` (the feed-tick path,
+  so the candle grows in); every other move uses `chart._swapBars()` +
+  `ts.jumpToRealtime()`. `_swapBars` deliberately does NOT snap/re-prime like
+  `setData` — a snap would fight the user's zoom on every scrub.
+- Markers after the cursor are HIDDEN, not clamped (`markerFilter`, cached on
+  the cursor): time→index resolution snaps to the nearest bar, so future
+  markers would otherwise pile onto the newest revealed candle.
+- Chart API: `startReplay(opts)` / `stopReplay()` / `replay` getter /
+  `replayState()`; options `bars, from, speed, baseInterval, loop, follow`.
+  Feed ticks and `_maybeLoadHistory` are ignored while replaying.
+- `'replay'` state event (immediate call on subscribe, `active:false` after
+  stop), dedup key = `active:playing:index:length:speed`.
+- Cursor floor is index 1 — the scales infer timeframe from the first pair.
+- Playground has a transport bar (`.replaybar`); landing page has a live
+  `#replay` section with its own transport (`.lp-replaygrid`).
+
 ## TODOs
-- **Publish 0.3.0 to npm** (`npm run release && npm publish ./dist-lib`) —
-  annotations + visibleRange ship together as **0.3.0**. 0.2.0 was never
-  published, so the registry jumps 0.1.0 → 0.3.0 (a version gap is fine).
-  The two "(v0.2.0, in source)" headings below are stale: both features
-  are 0.3.0.
+- **Publish 0.4.0 to npm** (`npm run release && npm publish ./dist-lib`) —
+  annotations + visibleRange + replay all ship together as **0.4.0**. 0.2.0
+  and 0.3.0 were never published, so the registry jumps 0.1.0 → 0.4.0 (gaps
+  are fine). Headings above marked "(v0.2.0, in source)" are stale: those
+  features are part of this same unpublished line.
+- User asked for "0.0.4"; source was already 0.3.0 and npm has 0.1.0, so
+  **0.4.0** was used instead (0.0.4 would be a downgrade npm rejects).
 - Version lives in exactly TWO places: `src/chart/index.js` (`version`) and
   `package.lib.json`. The landing page renders `v{version}` in the hero pill
   and the annotations tag, so bumping the export updates both labels.

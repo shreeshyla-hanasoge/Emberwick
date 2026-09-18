@@ -289,6 +289,80 @@ export declare class PriceScale {
   readonly hi: number
 }
 
+/* ---------------------------------------------------------------- replay -- */
+
+export interface ReplayOptions {
+  /** Dataset to replay. Defaults to the chart's current bars. */
+  bars?: Bar[]
+  /** Starting cursor index. Default: the midpoint of the dataset. */
+  from?: number
+  /** Rate multiplier, clamped to 0.25–500. Default 1. */
+  speed?: number
+  /** Real milliseconds one bar takes at 1×. Default 1000. */
+  baseInterval?: number
+  /** Restart from the beginning instead of stopping at the end. Default false. */
+  loop?: boolean
+  /** Re-anchor the right edge on the cursor when scrubbing. Default true. */
+  follow?: boolean
+}
+
+/** Payload of the 'replay' event, and the return of chart.replayState(). */
+export interface ReplayState {
+  /** False when the chart is not replaying; every other field is then inert. */
+  active: boolean
+  playing: boolean
+  /** Cursor: index of the newest revealed bar. -1 when inactive. */
+  index: number
+  /** Size of the dataset being replayed. */
+  length: number
+  /** 0 at the first playable bar, 1 at the last. */
+  progress: number
+  speed: number
+  /** `time` of the bar at the cursor. */
+  time: number | null
+  bar: Bar | null
+  atEnd: boolean
+}
+
+/**
+ * Bar-by-bar playback over a fixed dataset. Obtained from
+ * `chart.startReplay()` or `chart.replay`; not constructed directly.
+ */
+export declare class Replay {
+  readonly source: Bar[]
+  readonly length: number
+  readonly lastIndex: number
+  readonly atEnd: boolean
+  readonly bar: Bar | null
+  readonly time: number | null
+  readonly progress: number
+  /** Real ms between bars at the current speed. */
+  readonly interval: number
+  index: number
+  speed: number
+  playing: boolean
+  looping: boolean
+  follow: boolean
+  baseInterval: number
+
+  play(): this
+  pause(): this
+  toggle(): this
+  /** Clamped to 0.25–500. */
+  setSpeed(speed: number): this
+  setLoop(on: boolean): this
+  /** Move the cursor. Out-of-range values clamp. */
+  seek(index: number): this
+  step(n?: number): this
+  toStart(): this
+  toEnd(): this
+  state(): ReplayState
+}
+
+/** Speed bounds accepted by `setSpeed`. */
+export declare const MIN_SPEED: number
+export declare const MAX_SPEED: number
+
 /* ----------------------------------------------------------------- chart -- */
 
 export declare class Chart {
@@ -317,6 +391,21 @@ export declare class Chart {
   /** Topmost marker under a plot-relative point, else null. */
   markerAt(x: number, y: number): ResolvedMarker | null
 
+  /**
+   * Start bar-by-bar playback. With no `bars`, the chart's current data is
+   * the dataset. Returns null if there are fewer than two bars to replay.
+   *
+   *   chart.startReplay({ from: 200, speed: 4 })
+   *   chart.replay.play()
+   */
+  startReplay(options?: ReplayOptions): Replay | null
+  /** Leave replay and reveal the whole dataset again. */
+  stopReplay(): void
+  /** The active controller, or null. */
+  readonly replay: Replay | null
+  /** Current playback state; `{ active: false, ... }` when not replaying. */
+  replayState(): ReplayState
+
   setTheme(theme: Partial<Theme>): void
   setPriceMode(mode: PriceMode): void
   setAnimate(on: boolean): void
@@ -342,6 +431,7 @@ export declare class Chart {
   subscribe(event: 'markerClick', fn: (marker: ResolvedMarker) => void): () => void
   subscribe(event: 'markerHover', fn: (marker: ResolvedMarker | null) => void): () => void
   subscribe(event: 'visibleRange', fn: (range: VisibleRangePayload) => void): () => void
+  subscribe(event: 'replay', fn: (state: ReplayState) => void): () => void
 
   /** Removes listeners, canvases and the render loop. */
   destroy(): void

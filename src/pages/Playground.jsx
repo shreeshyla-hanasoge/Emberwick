@@ -3,6 +3,13 @@ import { createChart, RandomFeed, defaultTheme, lightTheme } from '../chart/inde
 
 const fmt = (v, d = 2) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '—')
 
+const fmtClock = (t) =>
+  typeof t === 'number'
+    ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '—'
+
+const SPEEDS = [1, 4, 20, 100]
+
 /**
  * A demo annotation set derived from whatever bars are loaded: a run of
  * alternating trades, two events stacked on one bar (to show collision
@@ -62,6 +69,7 @@ export default function Playground() {
   const [fps, setFps] = useState(0)
   const [legend, setLegend] = useState(null)
   const [range, setRange] = useState(null)
+  const [rp, setRp] = useState(null)
   const [hovering, setHovering] = useState(false)
   const [paused, setPaused] = useState(false)
   const [dark, setDark] = useState(true)
@@ -109,6 +117,9 @@ export default function Playground() {
     // No polling and no debounce: the event fires on subscribe with the
     // current window, then only when that window actually changes.
     const offRange = chart.subscribe('visibleRange', setRange)
+    // Same contract for playback: the transport below renders straight from
+    // this payload, so it never has to guess at the cursor.
+    const offReplay = chart.subscribe('replay', setRp)
 
     const id = setInterval(() => {
       setFps(chart.fps)
@@ -122,6 +133,7 @@ export default function Playground() {
       off()
       offClick()
       offRange()
+      offReplay()
       feed.destroy()
       chart.destroy()
       chartRef.current = null
@@ -132,13 +144,17 @@ export default function Playground() {
   // ---- control wiring ------------------------------------------------------
   const toggle = useCallback((fn) => () => { if (chartRef.current) fn(chartRef.current, feedRef.current) }, [])
 
+  const replaying = !!(rp && rp.active)
+
   useEffect(() => { chartRef.current?.setTheme(dark ? defaultTheme : lightTheme) }, [dark])
   useEffect(() => { chartRef.current?.setPriceMode(logScale ? 'log' : 'linear') }, [logScale])
   useEffect(() => { chartRef.current?.setAnimate(animate) }, [animate])
   useEffect(() => { chartRef.current?.setMagnet(magnet) }, [magnet])
   useEffect(() => { feedRef.current?.setTicksPerSecond(tps) }, [tps])
   useEffect(() => { feedRef.current?.setSpeed(speed) }, [speed])
-  useEffect(() => { feedRef.current?.setPaused(paused) }, [paused])
+  // The chart ignores feed ticks while replaying; stopping the generator too
+  // keeps the dataset you return to identical to the one you left.
+  useEffect(() => { feedRef.current?.setPaused(paused || replaying) }, [paused, replaying])
 
   useEffect(() => {
     const c = chartRef.current
@@ -155,6 +171,24 @@ export default function Playground() {
       setClicked(null)
     }
   }, [showMarkers, ready])
+
+  // ---- replay transport ----------------------------------------------------
+  const onReplay = (fn) => () => {
+    const r = chartRef.current?.replay
+    if (r) fn(r)
+  }
+
+  const toggleReplay = () => {
+    const c = chartRef.current
+    if (!c) return
+    if (c.replay) {
+      c.stopReplay()
+    } else {
+      // Halfway through the loaded history, paused: the user picks the moment
+      // to press play rather than being dropped into a running tape.
+      c.startReplay({ speed: 4, baseInterval: 1000 })
+    }
+  }
 
   const up = legend ? legend.close >= legend.open : true
   const chg = legend ? ((legend.close - legend.open) / legend.open) * 100 : 0
@@ -173,9 +207,10 @@ export default function Playground() {
         </div>
 
         <div className="controls">
-          <button className={paused ? 'btn' : 'btn on'} onClick={() => setPaused((p) => !p)}>
+          <button className={paused ? 'btn' : 'btn on'} onClick={() => setPaused((p) => !p)} disabled={replaying}>
             {paused ? '▶ Resume' : '❚❚ Pause'}
           </button>
+          <button className={replaying ? 'btn on' : 'btn'} onClick={toggleReplay}>⏱ Replay</button>
           <button className="btn" onClick={toggle((c) => c.snapToRealtime())}>⇥ Realtime</button>
           <button className={animate ? 'btn on' : 'btn'} onClick={() => setAnimate((v) => !v)}>Flow</button>
           <button className={showMarkers ? 'btn on' : 'btn'} onClick={() => setShowMarkers((v) => !v)}>Markers</button>
@@ -213,6 +248,61 @@ export default function Playground() {
         {!ready && <div className="loading">generating market…</div>}
       </div>
 
+      {replaying && (
+        <div className="replaybar">
+          <span className="rp-label">Replay</span>
+
+          <div className="rp-transport">
+            <button className="btn" title="To start" onClick={onReplay((r) => r.toStart())}>⏮</button>
+            <button className="btn" title="Back one bar" onClick={onReplay((r) => r.step(-1))}>◀</button>
+            <button
+              className={rp.playing ? 'btn on' : 'btn'}
+              title={rp.playing ? 'Pause' : 'Play'}
+              onClick={onReplay((r) => r.toggle())}
+            >
+              {rp.playing ? '❚❚' : '▶'}
+            </button>
+            <button className="btn" title="Forward one bar" onClick={onReplay((r) => r.step(1))}>▶|</button>
+            <button className="btn" title="To end" onClick={onReplay((r) => r.toEnd())}>⏭</button>
+            <button
+              className={rp.looping ? 'btn on' : 'btn'}
+              title="Loop"
+              onClick={onReplay((r) => r.setLoop(!r.looping))}
+            >
+              ↻
+            </button>
+          </div>
+
+          <div className="rp-scrub">
+            <input
+              type="range"
+              min="1"
+              max={Math.max(1, rp.length - 1)}
+              value={rp.index}
+              onChange={(e) => onReplay((r) => r.seek(+e.target.value))()}
+            />
+          </div>
+
+          <div className="rp-speeds">
+            {SPEEDS.map((s) => (
+              <button
+                key={s}
+                className={rp.speed === s ? 'btn on' : 'btn'}
+                onClick={onReplay((r) => r.setSpeed(s))}
+              >
+                {s}×
+              </button>
+            ))}
+          </div>
+
+          <span className="rp-read">
+            bar <b>{rp.index + 1}</b>/{rp.length} · <span className="rp-time">{fmtClock(rp.time)}</span>
+          </span>
+
+          <button className="btn" onClick={toggleReplay}>✕ Exit</button>
+        </div>
+      )}
+
       <div className="sliders">
         <label>
           Ticks/sec <b>{tps}</b>
@@ -223,8 +313,9 @@ export default function Playground() {
           <input type="range" min="1" max="240" value={speed} onChange={(e) => setSpeed(+e.target.value)} />
         </label>
         <p className="hint">
-          drag to pan (throw it — it glides) · wheel to zoom · drag the axes to scale ·
-          double-click to reset · click a marker · ← → + −
+          {replaying
+            ? 'replaying history · scrub or step bar-by-bar · markers appear as the cursor reaches them'
+            : 'drag to pan (throw it — it glides) · wheel to zoom · drag the axes to scale · double-click to reset · click a marker · ← → + −'}
         </p>
       </div>
     </div>

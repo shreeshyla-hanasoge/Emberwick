@@ -155,6 +155,55 @@ body.lock { overflow: hidden; }
   font-size: 11px; color: var(--muted); margin-left: auto;
 }
 
+/* ---- replay scrubber ---------------------------------------------------- */
+.replaybar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 9px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.rp-transport { display: flex; align-items: center; gap: 4px; }
+.rp-transport .btn {
+  padding: 6px 9px;
+  min-width: 32px;
+  justify-content: center;
+}
+
+.rp-scrub {
+  flex: 1;
+  min-width: 200px;
+  display: flex; align-items: center; gap: 10px;
+}
+.rp-scrub input[type=range] {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.rp-read {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.rp-read b { color: var(--text); font-weight: 600; }
+.rp-read .rp-time { color: var(--accent); }
+
+.rp-speeds { display: flex; align-items: center; gap: 4px; }
+.rp-speeds .btn { padding: 6px 8px; font-size: 11px; }
+
+.rp-label {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .rp-read { display: none; }
+}
+
 @media (max-width: 760px) {
   .hint { display: none; }
   .brand p { display: none; }
@@ -731,6 +780,67 @@ body.lock { overflow: hidden; }
 }
 
 .lp-annocode pre { max-height: 412px; }
+
+/* ---- replay ---- */
+.lp-replaygrid {
+  margin-top: 36px;
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/* the hero rule pushes .lp-chartwrap down; inside the grid it sits flush */
+.lp-replaychart .lp-chartwrap { margin: 0; box-shadow: 0 18px 50px rgba(0,0,0,0.42); }
+
+.lp-transport {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(12,16,23,0.55);
+}
+
+.lp-tbtns { display: flex; align-items: center; gap: 4px; }
+
+.lp-tbtn {
+  font: inherit; font-size: 12px; font-weight: 600;
+  min-width: 32px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 8px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.lp-tbtn:hover { color: var(--text); border-color: #384252; }
+.lp-tbtn.is-on {
+  color: var(--accent);
+  border-color: rgba(38,166,154,0.45);
+  background: rgba(38,166,154,0.10);
+}
+
+.lp-rpscrub { flex: 1; min-width: 140px; display: flex; }
+.lp-rpscrub input[type=range] {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.lp-rpread {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.lp-rpread b { color: var(--text); font-weight: 600; }
+
+@media (max-width: 900px) {
+  .lp-replaygrid { grid-template-columns: 1fr; }
+}
 
 /* ---- range events ---- */
 .lp-rangegrid {
