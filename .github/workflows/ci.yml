@@ -22,8 +22,8 @@ jobs:
         # 18 is the floor the published manifest advertises in "engines".
         node: ['18', '20', '22']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       # No install on purpose: the suite imports nothing outside src/ and
@@ -35,8 +35,8 @@ jobs:
     name: mutation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
       # Green tests are not evidence that the tests would NOTICE a regression.
@@ -47,8 +47,8 @@ jobs:
     name: build & package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: npm
@@ -62,7 +62,7 @@ jobs:
       - run: npm run size
       - name: What would be published
         run: npm pack --dry-run ./dist-lib
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-lib
           path: dist-lib/
