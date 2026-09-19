@@ -14,8 +14,10 @@
 const MAX_FRAME_ERRORS = 10
 
 export class Loop {
-  constructor(onFrame) {
+  constructor(onFrame, onGiveUp) {
     this.onFrame = onFrame
+    /** Called with the last error when the loop stops itself. Optional. */
+    this.onGiveUp = onGiveUp || null
     this._frameErrors = 0
     this.fps = 0
     this._raf = 0
@@ -33,9 +35,15 @@ export class Loop {
     this._schedule()
   }
 
+  /** False once the loop has stopped — see Chart#resume(). */
+  get running() { return this._running }
+
   start() {
     if (this._running) return
     this._running = true
+    // A restart is a fresh start: without this, a loop that gave up once
+    // would give up again after a single further error.
+    this._frameErrors = 0
     this._last = performance.now()
     this._fpsAt = this._last
     this.invalidate('all')
@@ -78,10 +86,15 @@ export class Loop {
       // false — nothing reschedules and the chart freezes for good.
       for (const l of dirty) this._dirty.add(l)
       if (++this._frameErrors >= MAX_FRAME_ERRORS) {
-        console.error(
-          `[Emberwick] frame error — stopping after ${MAX_FRAME_ERRORS} consecutive failures`, e)
         this._dirty.clear()
         this.stop()
+        // stop() clears _running, and _schedule() early-returns while it is
+        // false — so nothing, not even invalidate(), can revive the loop from
+        // here. Tell the owner, which surfaces it as an 'error' event and
+        // makes Chart#resume() the documented way back.
+        if (this.onGiveUp) this.onGiveUp(e)
+        else console.error(
+          `[Emberwick] frame error — stopped after ${MAX_FRAME_ERRORS} consecutive failures`, e)
         return
       }
       console.error('[Emberwick] frame error', e)

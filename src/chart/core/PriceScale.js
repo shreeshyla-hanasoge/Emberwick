@@ -58,16 +58,26 @@ export class PriceScale {
   }
 
   /**
-   * Is this a price this scale can actually plot?
+   * Coerce a price to a plottable number, or NaN if it is not one.
    *
-   * `isFinite(null)` is TRUE — null numifies to 0 — so a bar carrying a null
-   * low used to sail through the old isFinite() guard and drag the minimum to
-   * zero, flattening every candle into the top of the plot. Log mode has the
-   * same problem from the other end: log(0) is -Infinity, and the clamp to
-   * 1e-9 turns one zero tick into a ~20-decade range.
+   * Numeric STRINGS are accepted deliberately: Binance, Bybit and Kraken all
+   * return OHLC as strings, and rejecting them outright leaves the scale
+   * unset and the chart blank with no error at all. Coercing also fixes the
+   * original defect, which was that once `min` had become a string the next
+   * comparison was lexicographic.
+   *
+   * null, undefined, booleans and objects are NOT prices. `+null` is 0, and a
+   * null low silently dragging the range to zero — flattening every candle
+   * into the top of the plot — is exactly what this guard exists to stop.
+   * Log mode additionally rejects non-positives: log(0) is -Infinity, and
+   * clamping to 1e-9 turns one zero tick into a ~20-decade range.
    */
-  _plottable(v) {
-    return typeof v === 'number' && isFinite(v) && (this.mode !== 'log' || v > 0)
+  _price(v) {
+    const t = typeof v
+    if (t !== 'number' && t !== 'string') return NaN
+    const n = t === 'number' ? v : v.trim() === '' ? NaN : +v
+    if (!isFinite(n)) return NaN
+    return this.mode === 'log' && n <= 0 ? NaN : n
   }
 
   /** Fit visible bars. `extra` lets the forming candle influence the range. */
@@ -75,9 +85,12 @@ export class PriceScale {
     if (!this.auto || !bars.length) return
     let min = Infinity
     let max = -Infinity
-    const consider = (lo, hi) => {
-      if (this._plottable(lo) && lo < min) min = lo
-      if (this._plottable(hi) && hi > max) max = hi
+    // Compare the COERCED numbers, never the raw values.
+    const consider = (rawLo, rawHi) => {
+      const lo = this._price(rawLo)
+      const hi = this._price(rawHi)
+      if (!Number.isNaN(lo) && lo < min) min = lo
+      if (!Number.isNaN(hi) && hi > max) max = hi
     }
     for (let i = from; i <= to; i++) {
       const b = bars[i]

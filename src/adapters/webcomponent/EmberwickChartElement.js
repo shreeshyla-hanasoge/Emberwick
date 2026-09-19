@@ -13,7 +13,20 @@ import { createChart, defaultTheme, lightTheme } from '../../chart/index.js'
  * The chart is built in a shadow root so the host page's CSS can't reach in
  * and reposition the stacked canvases.
  */
-export class EmberwickChartElement extends HTMLElement {
+
+/**
+ * A class heritage clause is evaluated when the MODULE is evaluated, so
+ * `extends HTMLElement` threw a ReferenceError at import time under Node —
+ * long before the `typeof customElements` guard inside register() could run.
+ * That made this entry unimportable during an SSR or prerender pass, which is
+ * precisely the path the README points Vue, Svelte and Angular users at.
+ * In a browser this is exactly HTMLElement; elsewhere it is an inert stand-in
+ * that is never instantiated, because register() still declines to define the
+ * element without customElements.
+ */
+const ElementBase = typeof HTMLElement !== 'undefined' ? HTMLElement : class {}
+
+export class EmberwickChartElement extends ElementBase {
   static get observedAttributes() {
     return ['theme', 'animate', 'magnet']
   }

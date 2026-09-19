@@ -237,6 +237,7 @@ const chart = createChart(el, {
 | `replayState()` | Current playback state. `{ active: false, ... }` when not replaying |
 | `chart.replay` | Getter — the active `Replay` controller, or `null` |
 | `toImage()` | PNG data URL of the composited layers |
+| `resume()` | Restart the render loop after it gave up. See below |
 | `destroy()` | Remove listeners, stop the loop, drop canvases |
 | `chart.fps` | Getter — measured frames per second |
 
@@ -281,8 +282,29 @@ With no `'error'` subscriber the failure is logged to the console instead of
 vanishing. `setFeed()` itself never rejects, so `await chart.setFeed(feed)`
 is safe to leave unguarded; subscribe to `'error'` to react to the failure.
 
-A failed history page sets the same "stop asking" latch an empty page does, so
-the chart will not retry that boundary on every pan.
+A failed history page retries on the next pan, and stops being requested only
+after three consecutive failures — one transient 500 does not permanently
+disable lazy history.
+
+### Frame errors
+
+`'error'` also fires if the render loop gives up. A single throwing frame is
+recovered automatically: the pending layers are put back and the frame is
+retried. Ten *consecutive* failures — a lost canvas context, say — stop the
+loop instead of spinning at 60fps, and that is reported here:
+
+```js
+chart.subscribe('error', (err) => {
+  console.error(err)
+  // once the cause is dealt with:
+  chart.resume()
+})
+```
+
+`resume()` returns `false` if the chart is destroyed or the loop is already
+running, so it is safe to call blindly. Nothing else revives a stopped loop —
+not even `invalidate()` — because a chart on a live feed would otherwise
+re-enter the failure on every tick.
 
 ### Tracking the visible range
 
@@ -430,6 +452,11 @@ A marker is pinned to a **timestamp**, not a bar index, and resolves to the
 nearest bar. Load an older page of history and every marker re-resolves, so
 nothing drifts off its candle.
 
+Supply your own `id` if you have one. A generated id is derived from the
+marker's own identity rather than its array position, so passing the same
+markers to `setMarkers()` twice yields the same ids and an id captured for
+`removeMarker()` stays valid.
+
 A marker more than one timeframe outside the loaded range is **hidden**, not
 clamped to the end bar. A trade from six months before the loaded window is
 not an event that happened at the left edge of the chart, and drawing it there
@@ -438,6 +465,7 @@ is worse than not drawing it at all. Page that history in and it appears.
 | Field | Default | Notes |
 |---|---|---|
 | `time` | *required* | ms since epoch, snapped to the closest bar |
+| `id` | derived | Stable across calls — see below |
 | `id` | generated | Needed for `removeMarker(id)` |
 | `shape` | `'circle'` | See the list below |
 | `position` | shape-dependent | `'aboveBar'`, `'belowBar'`, `'inBar'`, `'atPrice'` |

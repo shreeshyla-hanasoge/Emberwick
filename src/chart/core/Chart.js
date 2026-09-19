@@ -34,6 +34,9 @@ const inactiveReplay = () => ({
 /** Consecutive gaps sampled when inferring the timeframe. */
 const TF_SAMPLES = 200
 
+/** Below this many samples the median is not yet meaningful — see below. */
+const TF_MIN_MEDIAN = 5
+
 /**
  * Consecutive failing history pages before paging gives up. One transient 500
  * must not permanently disable lazy history, but a feed that is reliably
@@ -52,21 +55,31 @@ const MAX_HISTORY_ERRORS = 3
  * cut-off. The median survives session breaks, weekends and holidays for as
  * long as most bars are consecutive, which is the normal case.
  *
- * Gaps are sampled at a stride so a 500k-bar dataset costs the same as a
- * small one, and each sample is still a genuine adjacent pair.
+ * Samples a CONTIGUOUS window from the middle rather than striding across the
+ * whole array: a stride that happens to be a multiple of the bars-per-session
+ * lands every sample on a session boundary and infers the gap instead of the
+ * timeframe. A window from the middle is also the cheapest way to stay O(1)
+ * on a 500k-bar dataset.
+ *
+ * With only a handful of samples the median is not robust — with exactly two
+ * gaps it IS the larger one, so a two-bar prefix spanning an overnight break
+ * would infer 17.75 hours. Below TF_MIN_MEDIAN samples the minimum is the
+ * better estimator, because the true bar duration is a floor: real gaps are
+ * always longer than the timeframe, never shorter.
  */
 export function inferTimeframe(bars, fallback = 60000) {
   const n = bars.length
   if (n < 2) return fallback
-  const stride = Math.max(1, Math.floor(n / TF_SAMPLES))
+  const start = Math.max(1, Math.floor(n / 2) - Math.floor(TF_SAMPLES / 2))
+  const end = Math.min(n, start + TF_SAMPLES)
   const gaps = []
-  for (let i = 1; i < n; i += stride) {
+  for (let i = start; i < end; i++) {
     const d = bars[i].time - bars[i - 1].time
     if (d > 0) gaps.push(d)
   }
   if (!gaps.length) return fallback
   gaps.sort((a, b) => a - b)
-  return gaps[gaps.length >> 1]
+  return gaps.length < TF_MIN_MEDIAN ? gaps[0] : gaps[gaps.length >> 1]
 }
 
 export class Chart {
@@ -94,6 +107,15 @@ export class Chart {
     // request that resolves second recognises itself as stale and drops its
     // result instead of writing over the newer feed's bars.
     this._feedGen = 0
+    /**
+     * Bumped whenever the bar array is REPLACED (setData, _swapBars,
+     * startReplay). _feedGen alone is not enough: a history page can be in
+     * flight when replay starts or when the caller swaps data by hand, and
+     * prepending onto a prefix that no longer exists scrolls the viewport off
+     * the data. Kept separate from _feedGen because bumping that in setData
+     * would trip setFeed's own continuation guard.
+     */
+    this._barGen = 0
     this._destroyed = false
     this._listeners = {
       crosshair: new Set(),
@@ -129,7 +151,10 @@ export class Chart {
     this.cursor = null
     this.plot = { x: 0, y: 0, w: 1, h: 1 }
 
-    this.loop = new Loop((dirty, dt) => this._frame(dirty, dt))
+    this.loop = new Loop(
+      (dirty, dt) => this._frame(dirty, dt),
+      (err) => this._emitError(err, 'frame'),
+    )
     this.layers.onResize = () => {
       this._layout()
       this.loop.invalidate('all')
@@ -160,6 +185,7 @@ export class Chart {
     this.bars = Array.isArray(bars) ? bars.slice() : []
     this._exhausted = false
     this._historyErrors = 0
+    this._barGen++
     this._resolveKey = '' // new bars, so every marker index must re-resolve
     if (this.bars.length > 1) {
       this.ts.timeframeMs = inferTimeframe(this.bars, this.ts.timeframeMs)
@@ -178,9 +204,16 @@ export class Chart {
    * scrub, so a snap would fight the user's zoom and the price scale would
    * pop instead of easing between windows.
    */
-  _swapBars(bars) {
+  _swapBars(bars, timeframeMs) {
     this.bars = Array.isArray(bars) ? bars : []
-    if (this.bars.length > 1) {
+    this._barGen++
+    // Replay passes the timeframe of the WHOLE dataset. Re-inferring it from
+    // the revealed prefix would read a 2-bar prefix that straddles a session
+    // break as a 17-hour timeframe, which then widens Replay's future-marker
+    // cut-off and leaks tomorrow's trades into today's playback.
+    if (isFinite(timeframeMs) && timeframeMs > 0) {
+      this.ts.timeframeMs = timeframeMs
+    } else if (this.bars.length > 1) {
       this.ts.timeframeMs = inferTimeframe(this.bars, this.ts.timeframeMs)
     }
     this.ts.setBarCount(this.bars.length)
@@ -234,6 +267,11 @@ export class Chart {
     this.feed = feed
     if (!feed) return
     const gen = ++this._feedGen
+    // Taking ownership means dropping the previous symbol NOW. Otherwise a
+    // rejected first page leaves the new feed attached to the old symbol's
+    // bars, and the next pan asks the new symbol for history anchored at the
+    // old symbol's oldest timestamp.
+    if (this.bars.length) this.setData([])
     this.ts.timeframeMs = feed.timeframe || this.ts.timeframeMs
     let bars
     try {
@@ -274,6 +312,7 @@ export class Chart {
     this._feedGen++
     this._loadingHistory = false
     this._historyErrors = 0
+    this._exhausted = false // the next feed gets a clean slate
     if (this._unsub) this._unsub()
     this._unsub = null
     this.feed = null
@@ -293,6 +332,7 @@ export class Chart {
     // including _exhausted, which a stale page could otherwise latch on a
     // fresh symbol that still has years of history.
     const gen = this._feedGen
+    const barGen = this._barGen
     const feed = this.feed
     try {
       const older = await feed.getBars({
@@ -301,8 +341,11 @@ export class Chart {
         to: this.bars[0].time,
         limit: 1000,
       })
-      if (gen !== this._feedGen || this._destroyed) return
-      if (!this.bars.length) return
+      // The bar array must still be the one we measured the boundary against:
+      // a replay that started, or a caller's setData, while this page was in
+      // flight means these bars belong in front of something that is gone.
+      if (gen !== this._feedGen || barGen !== this._barGen || this._destroyed) return
+      if (this._replay || !this.bars.length) return
       if (!older || !older.length) {
         this._exhausted = true
         return
@@ -329,7 +372,7 @@ export class Chart {
       this.ts._right.jump(this.ts._right.value + added.length)
       this.loop.invalidate('all')
     } catch (err) {
-      if (gen !== this._feedGen || this._destroyed) return
+      if (gen !== this._feedGen || barGen !== this._barGen || this._destroyed) return
       // Retry on the next pan; latch only once the feed looks properly dead.
       if (++this._historyErrors >= MAX_HISTORY_ERRORS) this._exhausted = true
       this._emitError(err, 'loadHistory')
@@ -549,17 +592,20 @@ export class Chart {
     // 'visibleRange' is a state event, not a notification: a new subscriber is
     // told the CURRENT window straight away, so it never has to wait for the
     // user to pan before it knows what is on screen.
+    // The immediate call is wrapped because a throw here would escape BEFORE
+    // the unsubscriber is returned, leaving the listener registered with no
+    // way for the caller to ever remove it.
     if (event === 'visibleRange') {
       const payload = this.visibleRange()
       this._stateKeys.visibleRange.set(fn, this._rangeIdentity(payload))
-      fn(payload)
+      try { fn(payload) } catch (e) { console.error("[Emberwick] 'visibleRange' listener threw", e) }
     }
     // 'replay' is a state event for the same reason: a transport UI can render
     // itself from the first call instead of waiting for the first tick.
     if (event === 'replay') {
       const payload = this.replayState()
       this._stateKeys.replay.set(fn, this._replayIdentity(payload))
-      fn(payload)
+      try { fn(payload) } catch (e) { console.error("[Emberwick] 'replay' listener threw", e) }
     }
     return () => {
       set.delete(fn)
@@ -622,8 +668,17 @@ export class Chart {
     const keys = this._stateKeys[event]
     for (const fn of set) {
       if (keys.get(fn) === key) continue
+      // Record BEFORE calling: a listener that throws has still had its turn,
+      // and leaving the key unset would re-deliver the same state every frame.
       keys.set(fn, key)
-      fn(payload)
+      // State events are emitted from inside the frame, so an unguarded throw
+      // here counts against Loop's consecutive-error budget — ten of them and
+      // a consumer's own buggy handler stops the chart.
+      try {
+        fn(payload)
+      } catch (e) {
+        console.error(`[Emberwick] '${event}' listener threw`, e)
+      }
     }
   }
 
@@ -659,10 +714,14 @@ export class Chart {
     // Snapshot BEFORE the controller starts swapping prefixes in, otherwise
     // the dataset would be the live array it is about to shorten.
     const dataset = source.slice()
+    this._barGen++ // an in-flight history page no longer belongs to these bars
     // The caller still holds whatever the previous startReplay() returned;
     // without detaching, its transport methods keep driving this chart.
     if (this._replay) this._replay.detach()
-    this._replay = new Replay(this, { ...options, bars: dataset })
+    // Inferred ONCE from the whole dataset. The controller hands it back on
+    // every prefix swap so the scales never have to guess from two bars.
+    const timeframeMs = inferTimeframe(dataset, this.ts.timeframeMs)
+    this._replay = new Replay(this, { ...options, bars: dataset, timeframeMs })
     return this._replay
   }
 
@@ -702,6 +761,9 @@ export class Chart {
   /** Replace every marker. Each `time` is resolved to its nearest bar. */
   setMarkers(markers) {
     this._markers = normalizeMarkers(markers)
+    // The hovered marker may not exist any more; keeping its id would report
+    // a hover on something no marker owns.
+    this._hoverMarkerId = null
     this._resolveKey = '' // force re-resolution on the next frame
     if (this._replay) this._replay.invalidateMarkers()
     this.loop.invalidate('main')
@@ -855,6 +917,20 @@ export class Chart {
     this.ts.snapToRealtime()
     this.ps.resetAuto()
     this.loop.invalidate('all')
+  }
+
+  /**
+   * Restart the render loop after it gave up on consecutive frame errors.
+   *
+   * The loop stops itself after ten failing frames in a row and reports the
+   * last error through the 'error' event. Fix the cause — a lost canvas
+   * context is the usual one — then call this. Returns false if the chart is
+   * destroyed or the loop is already running, so it is safe to call blindly.
+   */
+  resume() {
+    if (this._destroyed || this.loop.running) return false
+    this.loop.start()
+    return true
   }
 
   toImage() {

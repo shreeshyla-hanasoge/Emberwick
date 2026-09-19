@@ -3,6 +3,75 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-09-19
+
+Fixes regressions introduced by 0.5.0. **Upgrade from 0.5.0.** Three of these
+are silent: no error, no console output, just wrong output on screen.
+
+### Fixed
+
+- **A feed supplying OHLC as numeric strings rendered a blank chart.** 0.5.0's
+  `typeof v === 'number'` guard rejected them outright, so every candidate was
+  skipped, `fit()` bailed each frame and the price bounds never left their 0–1
+  defaults. Binance, Bybit and Kraken all return strings. Prices are now
+  coerced and compared numerically; `null`, `undefined`, booleans and objects
+  are still rejected, and log mode still rejects non-positives.
+- **A persistently failing frame stopped the chart with no way back.** 0.5.0's
+  give-up called `Loop.stop()`, which clears `_running` — and `_schedule()`
+  early-returns while it is false, so not even `invalidate()` could revive it.
+  The loop now reports the failure through the **`'error'` event** and
+  `chart.resume()` restarts it. `Loop.start()` also clears the error budget,
+  so a revived loop gets a full allowance. Errors below the cap still self-heal
+  silently, as in 0.5.0.
+- **`removeMarker(id)` stopped working for generated ids.** 0.5.0 made them
+  monotonic to fix a collision, but `setMarkers()` re-normalises the whole
+  array, so calling it twice with the same input minted fresh ids and any id
+  the caller had captured was dead. Ids are now derived from the marker's own
+  identity — time, shape, and nth duplicate — which is both unique and stable
+  across calls, page loads and two charts showing the same data.
+- **Replay re-inferred the timeframe from the revealed prefix.** `_swapBars`
+  guessed from as few as two bars, and at the cursor floor a tape opening on a
+  session break yielded 17.75 hours — the exact failure 0.5.0's median fix was
+  written to prevent, on the one path that never reached it. `startReplay()`
+  now computes the timeframe once from the whole dataset and the controller
+  carries it through every swap. This also stopped a widened marker cut-off
+  revealing future trades during playback.
+- **`inferTimeframe` now samples a contiguous window from the middle** rather
+  than striding, since a stride that is a multiple of the bars-per-session
+  lands every sample on a session boundary. Below five samples it takes the
+  minimum rather than the median: with two gaps the median IS the larger one.
+- **A throwing state listener could stop the chart.** `visibleRange` and
+  `replay` are emitted from inside the frame, so ten throws from a consumer's
+  own handler exhausted the loop's error budget. Listener calls are now
+  sandboxed. `subscribe()`'s immediate delivery is too — a throw there escaped
+  before the unsubscriber was returned, leaving the listener unremovable.
+- **A history page landing after replay started spliced into the prefix** and
+  scrolled the viewport off the data. Bar-array ownership is now tracked
+  separately from feed ownership, so a page that no longer belongs is dropped.
+- **A rejected `setFeed()` left the previous symbol's bars on screen** under
+  the new feed, and the next pan asked the new symbol for history anchored at
+  the old symbol's oldest timestamp. Taking ownership now clears them.
+- **`detachFeed()` did not reset the exhausted latch**, so a feed attached
+  after one that ran out of history could never page.
+- **The web-component entry threw a `ReferenceError` at import under SSR.**
+  `extends HTMLElement` is evaluated when the module is, long before the
+  `customElements` guard inside `register()` runs — which made this entry
+  unimportable during a prerender pass, the exact path the README points
+  Vue, Svelte and Angular users at.
+- **`setMarkers()` kept a stale hover id** for a marker that no longer exists.
+
+### Added
+
+- **`chart.resume()`** — restart the render loop after it gives up. Returns
+  false if the chart is destroyed or already running.
+- **`frame()` and `settle()` in the test harness.** Before this, `Chart._frame`
+  executed **zero times** across the whole suite, leaving marker resolution,
+  autoscale and both state emissions unverified — which is how 0.5.0 shipped a
+  blank-chart regression with every test green.
+- `test/chart-0.5.1.test.mjs` — 19 cases. The suite is now 46 tests, and all
+  13 fixes above were confirmed by mutation: reverting any one of them turns
+  the suite red.
+
 ## [0.5.0] — 2026-09-19
 
 Correctness release. Thirteen defects, most of them able to put wrong data on

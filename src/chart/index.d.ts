@@ -445,6 +445,13 @@ export declare class Chart {
   subscribe(event: 'error', fn: (error: unknown) => void): () => void
 
   /** Removes listeners, canvases and the render loop. */
+  /**
+   * Restart the render loop after it gave up on consecutive frame errors.
+   * The loop stops itself after ten failing frames in a row and reports the
+   * last error through the 'error' event; fix the cause, then call this.
+   * Returns false if the chart is destroyed or the loop is already running.
+   */
+  resume(): boolean
   destroy(): void
 
   readonly bars: Bar[]

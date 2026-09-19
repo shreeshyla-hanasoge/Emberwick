@@ -56,6 +56,29 @@ export function installDom() {
   return () => { for (const k of Object.keys(saved)) globalThis[k] = saved[k] }
 }
 
+/**
+ * Run one real frame.
+ *
+ * requestAnimationFrame deliberately never fires in this harness, so nothing
+ * drives Chart._frame on its own — which meant marker resolution, price-scale
+ * autoscale, the marker hit map and both state emissions went completely
+ * unverified. Drive it explicitly instead: still deterministic, but the render
+ * path actually executes.
+ *
+ * `dt` is the frame delta in ms (16 ≈ 60fps). Returns whatever _frame returns,
+ * i.e. true while something is still animating.
+ */
+export function frame(chart, dt = 16, dirty = ['all']) {
+  return chart._frame(new Set(dirty), dt)
+}
+
+/** Run frames until nothing is animating, or `max` is reached. Returns the count. */
+export function settle(chart, max = 600, dt = 16) {
+  let n = 0
+  while (n < max && frame(chart, dt)) n++
+  return n
+}
+
 /** Ascending, de-duplicated bars — the documented feed contract. */
 export function makeBars(startMs, count, tfMs = 60_000, price = 100) {
   return Array.from({ length: count }, (_, i) => ({

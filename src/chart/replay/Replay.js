@@ -53,6 +53,13 @@ export class Replay {
      * a chart that has moved on. Detaching neuters it.
      */
     this._detached = false
+    /**
+     * Timeframe of the WHOLE dataset, supplied by Chart.startReplay. The
+     * revealed prefix is too short to infer it from — at the cursor floor it
+     * is two bars — and getting it wrong widens the future-marker cut below.
+     */
+    this.timeframeMs =
+      isFinite(options.timeframeMs) && options.timeframeMs > 0 ? options.timeframeMs : null
 
     // The scales infer the timeframe from the first PAIR of bars, so two bars
     // is the floor — the cursor never goes below index 1.
@@ -215,7 +222,7 @@ export class Replay {
     if (t == null) return markers
     const key = this.index + ':' + markers.length
     if (key !== this._markerKey || !this._markerView) {
-      const cut = t + (this.chart.ts.timeframeMs || 0) / 2
+      const cut = t + (this.timeframeMs || this.chart.ts.timeframeMs || 0) / 2
       this._markerView = markers.filter((m) => m.time <= cut)
       this._markerKey = key
     }
@@ -244,7 +251,7 @@ export class Replay {
       chart.append(this.source[this.index])
       return
     }
-    chart._swapBars(this.source.slice(0, this.index + 1))
+    chart._swapBars(this.source.slice(0, this.index + 1), this.timeframeMs)
     if (this.follow) chart.ts.jumpToRealtime()
   }
 

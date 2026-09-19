@@ -22,12 +22,23 @@ export const MARKER_SHAPES = [
 const SHAPE_SET = new Set(MARKER_SHAPES)
 
 /**
- * Monotonic, so generated ids are unique for the life of the module. Keying
- * them off the array index meant removing a marker and adding another handed
- * the newcomer an id the survivor might already own, and removeMarker(id)
- * would then take the wrong one.
+ * Generated ids are derived from the marker's own identity, never from its
+ * array position and never from a counter.
+ *
+ * Index-keyed ids collided: remove one marker, add another, and the newcomer
+ * could be handed an id a survivor already owned. A monotonic counter fixes
+ * that but breaks the other half of the contract — setMarkers() re-normalises
+ * the whole array, so calling it twice with the same input minted fresh ids
+ * and any id the caller had captured for removeMarker() was already dead.
+ * Deriving from (time, shape, nth-duplicate) is both unique and stable across
+ * calls, page loads and two charts showing the same data.
  */
-let autoId = 0
+function derivedId(marker, seen) {
+  const base = `mk${marker.time}:${marker.shape}`
+  const n = seen.get(base) || 0
+  seen.set(base, n + 1)
+  return n ? `${base}:${n}` : base
+}
 
 /** Buys sit under the bar, sells over it — the convention traders expect. */
 const DEFAULT_POSITION = {
@@ -39,6 +50,11 @@ const DEFAULT_POSITION = {
 
 const POSITIONS = new Set(['aboveBar', 'belowBar', 'inBar', 'atPrice'])
 
+/**
+ * Normalise one marker. `id` comes back null when the caller supplied none —
+ * normalizeMarkers() fills it in, because a stable generated id needs to see
+ * the whole batch to disambiguate duplicates.
+ */
 // eslint-disable-next-line no-unused-vars
 export function normalizeMarker(raw, i) {
   if (!raw || !isFinite(raw.time)) return null
@@ -47,7 +63,7 @@ export function normalizeMarker(raw, i) {
     ? raw.position
     : DEFAULT_POSITION[shape] || 'aboveBar'
   return {
-    id: raw.id != null ? String(raw.id) : `mk${++autoId}`,
+    id: raw.id != null ? String(raw.id) : null,
     time: +raw.time,
     price: isFinite(raw.price) ? +raw.price : null,
     shape,
@@ -65,9 +81,12 @@ export function normalizeMarker(raw, i) {
 export function normalizeMarkers(list) {
   if (!Array.isArray(list)) return []
   const out = []
+  const seen = new Map()
   for (let i = 0; i < list.length; i++) {
     const m = normalizeMarker(list[i], i)
-    if (m) out.push(m)
+    if (!m) continue
+    if (m.id === null) m.id = derivedId(m, seen)
+    out.push(m)
   }
   out.sort((a, b) => a.time - b.time)
   return out
