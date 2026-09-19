@@ -24,7 +24,10 @@ let failed = false
 for (const [rel, maxKb] of BUDGETS) {
   const file = resolve(root, rel)
   if (!existsSync(file)) {
-    console.log(`- ${rel}: not built, skipped`)
+    // Never skip: a missing file here is how a build that dropped dist-lib/umd
+    // still reported success while the manifest advertised a CDN entry.
+    console.log(`FAIL ${rel}: missing — expected a built file`)
+    failed = true
     continue
   }
   const raw = await readFile(file)

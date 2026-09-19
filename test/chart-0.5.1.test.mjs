@@ -355,3 +355,68 @@ test('a frame resolves marker indices and fits the price scale', () => {
   assert.ok(chart.ps.lo < 100 && chart.ps.hi > 100, 'and fit the scale to the bars')
   chart.destroy()
 })
+
+// ---------------------------------------------- gaps the mutation run found
+test('every listener receives every distinct state, not just the first one served', () => {
+  const chart = createChart(makeContainer())
+  chart.setData(makeBars(T0, 400, MIN))
+
+  const a = []
+  const b = []
+  chart.subscribe('visibleRange', (p) => a.push(`${p.from}:${p.to}`))
+  chart.subscribe('visibleRange', (p) => b.push(`${p.from}:${p.to}`))
+
+  for (let i = 0; i < 12; i++) {
+    chart.ts.panBy(120)
+    const r = chart.ts.visibleRange()
+    chart._emitVisibleRange(r.from, r.to)
+  }
+
+  // A shared dedupe key serves whichever listener the loop reaches first and
+  // silently skips the rest, so the two logs diverge.
+  assert.deepEqual(b, a, 'both listeners must see the same sequence of states')
+  assert.ok(a.length > 1, 'the window must actually have moved')
+  chart.destroy()
+})
+
+test('inferTimeframe samples the middle, not the opening bars', () => {
+  const DAY = 86_400_000
+  // 250 daily bars, then 1000 minute bars. Sampling the opening gaps sees only
+  // days; the middle window sits entirely in the minute region.
+  const bars = [
+    ...Array.from({ length: 250 }, (_, i) => ({ time: T0 + i * DAY })),
+    ...Array.from({ length: 1000 }, (_, i) => ({ time: T0 + 250 * DAY + (i + 1) * MIN })),
+  ]
+  assert.equal(inferTimeframe(bars, 1), MIN,
+    'reading only the opening gaps infers the wrong cadence')
+})
+
+test('a detached replay controller cannot swap bars even through internals', () => {
+  const chart = createChart(makeContainer())
+  chart.setData(makeBars(T0, 100, MIN))
+  const first = chart.startReplay({ from: 20 })
+  chart.startReplay({ from: 80 })
+
+  const before = chart.bars.length
+  // Reach past the transport guards straight at the one method that mutates
+  // the chart — defence in depth is only depth if the inner layer holds.
+  first._apply('seek')
+  assert.equal(chart.bars.length, before, 'a detached controller must not reach the bars')
+  chart.destroy()
+})
+
+test('replay trusts its own timeframe, not whatever the scale currently holds', () => {
+  const chart = createChart(makeContainer())
+  chart.setData(makeBars(T0, 200, MIN))
+  const replay = chart.startReplay({ from: 100 })
+
+  // Something else corrupts the scale's idea of the timeframe.
+  chart.ts.timeframeMs = SESSION_GAP
+  chart.setMarkers([{ time: chart.bars[chart.bars.length - 1].time + 30 * MIN, shape: 'arrowUp', text: 'FUTURE' }])
+  frame(chart)
+
+  const shown = replay.markerFilter(chart.getMarkers())
+  assert.ok(!shown.some((m) => m.text === 'FUTURE'),
+    'a corrupted scale timeframe must not widen the future cut-off')
+  chart.destroy()
+})

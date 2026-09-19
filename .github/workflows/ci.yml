@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# A newer push makes an in-flight run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18 is the floor the published manifest advertises in "engines".
+        node: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # No install on purpose: the suite imports nothing outside src/ and
+      # node:*, so it runs against a bare checkout. Nothing to break, nothing
+      # to cache, and no registry outage can turn the tests red.
+      - run: npm test
+
+  mutate:
+    name: mutation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # Green tests are not evidence that the tests would NOTICE a regression.
+      # This reverts each shipped fix in turn and fails on any the suite misses.
+      - run: npm run mutate
+
+  build:
+    name: build & package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run build:lib
+      - run: npm run build:umd
+      - run: npm run pack:lib
+      # Catches a tarball whose manifest advertises files the build dropped —
+      # the failure mode that ships a 404 to every CDN consumer.
+      - run: npm run verify:package
+      - run: npm run size
+      - name: What would be published
+        run: npm pack --dry-run ./dist-lib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-lib
+          path: dist-lib/
+          retention-days: 14
