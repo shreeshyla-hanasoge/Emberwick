@@ -73,9 +73,9 @@ as-is.
 | `emberwick` | The core: `createChart`, `Chart`, feeds, themes, motion primitives |
 | `emberwick/react` | `<EmberwickChart />` React component |
 | `emberwick/webcomponent` | Registers `<emberwick-chart>` (side-effecting import) |
-| `emberwick/umd` | Single-file UMD build for `<script>` tags |
 
-TypeScript declarations ship for all three entries.
+TypeScript declarations ship for all three entries. The UMD build is not an
+import specifier — it is a file you point a `<script>` tag or a CDN at.
 
 ---
 
@@ -179,7 +179,7 @@ await chart.setFeed(new MyApiFeed())
 | `getBars({ symbol, timeframe, to, limit })` | yes | `Promise<Bar[]>`. `to: null` means "most recent". Return `[]` to signal no more history |
 | `subscribe(handler)` | for live data | Returns an unsubscribe function |
 | `prime(lastBar)` | optional | Called once after history loads, so the feed can seed its forming candle |
-| `destroy()` | optional | Your own cleanup |
+| `destroy()` | optional | **Yours to call.** The chart never does: `detachFeed()` and `chart.destroy()` only run the unsubscribe that `subscribe()` returned |
 
 ### Update messages
 
@@ -195,8 +195,13 @@ because rendering is decoupled from data arrival.
 ### Lazy history
 
 When the user pans to within **80 bars** of the left edge, the chart calls
-`getBars({ to: oldestLoadedTime })` and prepends the result, holding the view
-on the same bars. Return an empty array and it stops asking permanently.
+`getBars({ to: oldestLoadedTime, limit: 1000 })` and prepends the result,
+holding the view on the same bars. Return an empty array and it stops asking
+permanently. The page size is fixed at 1000; `initialBars` sizes only the
+first load.
+
+A rejected page is retried on the next pan and only stops being requested
+after three consecutive failures — subscribe to `'error'` to see them.
 
 ---
 
@@ -215,6 +220,11 @@ const chart = createChart(el, {
   initialBars: 1500,     // first getBars() page size
   timeScale: { spacing: 9, minSpacing: 0.8, maxSpacing: 160, rightOffset: 12 },
   priceScale: { mode: 'linear', tau: 120, marginTop: 0.12, marginBottom: 0.12 },
+
+  // Annotations can be supplied up front instead of via the setters.
+  markers: [{ time: 1717070400000, shape: 'arrowUp', text: 'BUY' }],
+  priceLines: [{ price: 148.2, title: 'target' }],
+  zones: [{ from: 143.5, to: 145.9, label: 'value area' }],
 })
 ```
 
@@ -229,7 +239,7 @@ const chart = createChart(el, {
 | `detachFeed()` | Unsubscribe, keep the bars on screen |
 | `subscribe(event, fn)` | Returns an unsubscribe fn. See events below |
 | `setMarkers(markers)` | Replace every marker |
-| `getMarkers()` | Current markers, normalised, each with its resolved bar index |
+| `getMarkers()` | Current markers, normalised, each with its resolved bar index. See below |
 | `addMarker(marker)` | Append one marker |
 | `removeMarker(id)` | Remove by id |
 | `clearMarkers()` | Remove all markers |
@@ -240,6 +250,7 @@ const chart = createChart(el, {
 | `setPriceMode(mode)` | `'linear'` or `'log'` |
 | `setAnimate(bool)` | Toggle live-candle easing |
 | `setMagnet(bool)` | Toggle crosshair OHLC snapping |
+| `visibleRange()` | The window currently on screen — the same payload the `'visibleRange'` event carries |
 | `snapToRealtime()` | Jump back to the newest bar and re-enable autoscale |
 | `startReplay(options?)` | Begin bar-by-bar playback. Returns the `Replay`, or `null` if there is nothing to replay |
 | `stopReplay()` | Leave replay and reveal the whole dataset again |
@@ -395,6 +406,12 @@ Returns the `Replay`, or `null` when there are fewer than two bars. While a
 replay is active an attached feed is ignored, so live ticks cannot fight the
 cursor; `stopReplay()` restores the full dataset and resumes normal service.
 
+`setData()` also ends a replay — new data means the dataset being replayed no
+longer exists. The controller you were handed is detached at that point and
+its transport methods become no-ops, so check `chart.replay` rather than
+holding the old reference. Calling `startReplay()` twice detaches the first
+controller the same way.
+
 ### Transport
 
 Every method returns the controller, so calls chain.
@@ -492,9 +509,23 @@ Shapes: `arrowUp`, `arrowDown`, `triangleUp`, `triangleDown`, `circle`,
 Position defaults follow the trading convention: up-pointing shapes sit
 *below* the bar, down-pointing shapes *above* it, everything else above.
 
+**When `index` is resolved.** `getMarkers()` hands back the normalised
+markers, but time→index resolution happens in the render frame, not in
+`setMarkers()`. Call them back to back and every `index` is still `-1`; it is
+populated after the next frame. `-1` also means *deliberately hidden* — a
+marker more than one timeframe outside the loaded range resolves to `-1`
+rather than clamping onto an end bar — so treat it as "not drawn", not as
+"not yet known".
+
+**Ids.** Supply your own, or let one be derived from the marker's identity
+(time, shape, and which duplicate it is). Derived ids are stable across
+`setMarkers()` calls, page loads and two charts showing the same data, so an
+id captured for `removeMarker()` stays valid.
+
 **Overlap and density.** Markers sharing a bar are stacked rather than drawn on
-top of each other. Below about 3px per bar, dense runs thin to roughly one
-marker per 4px — a thousand trades stay legible and stay fast. A marker on the
+top of each other. Once a candle body is 3px wide or less — around 5.6px per
+bar, since a body is 72% of the slot — dense runs thin to roughly one marker
+per 4px — a thousand trades stay legible and stay fast. A marker on the
 forming candle anchors to the animated values, so it flows with the live bar.
 
 ### Price lines
@@ -512,6 +543,14 @@ forming candle anchors to the animated values, so it flows with the live bar.
 
 Supply `from`/`to` for a **price band** spanning the full width, or
 `fromTime`/`toTime` for a **time band** spanning the full height.
+
+| Field | Default | Notes |
+|---|---|---|
+| `from` / `to` | — | Price band bounds. Non-finite values are skipped silently |
+| `fromTime` / `toTime` | — | Time band bounds, ms epoch, resolved to the nearest bar |
+| `color` | theme-derived | Fill |
+| `border` | — | Stroke around the band; omitted when unset |
+| `label` | — | Drawn at the top-left corner of the band |
 
 ```js
 chart.setZones([
@@ -536,7 +575,7 @@ if you need them guaranteed visible.
 | Two-finger pinch | Zoom |
 | Drag price axis | Stretch the price scale |
 | Drag time axis | Zoom the time scale |
-| Double-click | Snap back to realtime |
+| Double-click | Reset: default zoom, price scale back to autoscale, snap to realtime |
 | `←` / `→` | Pan (hold `Shift` for a bigger step) |
 | `+` / `-` | Zoom |
 
@@ -790,13 +829,16 @@ Source layout:
 ```
 src/chart/                  the library core (zero deps, no framework)
   core/      Chart, Layers, Loop, TimeScale, PriceScale, palette, formatters
-  render/    grid, candles, crosshair
+  render/    grid, candles, crosshair, annotations
   motion/    Tween (Smoothed), Inertia, LiveCandle
+  overlays/  annotations (normalise, resolve, collision layout)
+  replay/    Replay (bar-by-bar playback)
   data/      DataFeed (the seam), RandomFeed
   index.js   public API surface   index.d.ts  types
-src/adapters/react/         <EmberwickChart />
+src/adapters/react/         <EmberwickChart /> + dataPlan (framework-agnostic)
 src/adapters/webcomponent/  <emberwick-chart>
-src/App.jsx, src/styles.css  the playground (not published)
+src/pages/, src/App.jsx, src/styles.css   the playground (not published)
+test/                       node --test, no jsdom (not published)
 ```
 
 ---
@@ -812,13 +854,21 @@ Honest list of what isn't there yet:
 - **No indicators or drawing tools.** SMA/EMA/RSI/MACD, multi-pane layout and
   trendlines are planned but not implemented.
 - **Candlesticks only.** No Heikin-Ashi, line, area or baseline series yet.
-- **No session-gap collapsing.** Weekends and market closes render as ordinary
-  bar-index steps, not gaps.
+- **No session awareness.** The time axis is indexed by bar, not by clock, so
+  weekends and overnight closes collapse to an ordinary bar step — which is
+  usually what you want. What is missing is the other half: nothing marks
+  where one session ends and the next begins, because a day boundary is only
+  labelled at local midnight and intraday sessions rarely open there.
+- **No timezone control.** Axis and crosshair times are formatted in the
+  browser's local zone, with no `timeFormatter` or `timeZone` option. If your
+  timestamps encode exchange-local wall time rather than true epochs, they
+  will render shifted.
 - **`RandomFeed` deep history is per-page coherent, not one continuous walk** —
   it regenerates backwards from a seed offset, so paging far left can show a
   visible seam. Real feeds don't have this artifact.
 - **Types are hand-written**, not generated from source, so they can drift
   from the implementation.
+- **ESM only.** No CommonJS build; `require()` will not resolve the package.
 
 ---
 

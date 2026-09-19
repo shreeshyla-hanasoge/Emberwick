@@ -270,3 +270,55 @@ test('the planned actions keep the viewport where the user put it', () => {
     'setData re-anchors — which is exactly why identity-keyed re-application hurt')
   chart.destroy()
 })
+
+// ------------------------------------------------- newly documented surface
+test('markers, priceLines and zones can be supplied to createChart', () => {
+  // Implemented and typed since annotations landed, but undocumented until
+  // 0.6.1 — and therefore never exercised.
+  const chart = createChart(makeContainer(), {
+    markers: [{ time: T0 + 10 * MIN, shape: 'arrowUp', text: 'BUY' }],
+    priceLines: [{ price: 100.5, title: 'target' }],
+    zones: [{ from: 99, to: 101, label: 'value area' }],
+  })
+  chart.setData(makeBars(T0, 100, MIN))
+  frame(chart)
+
+  assert.equal(chart.getMarkers().length, 1, 'constructor markers must be normalised')
+  assert.equal(chart.getMarkers()[0].index, 10, 'and resolved like any other')
+  assert.equal(chart.priceLines.length, 1)
+  assert.equal(chart.zones.length, 1)
+  chart.destroy()
+})
+
+test('getMarkers() index is -1 until a frame has run, as documented', () => {
+  const chart = createChart(makeContainer())
+  chart.setData(makeBars(T0, 100, MIN))
+  chart.setMarkers([{ time: T0 + 20 * MIN, shape: 'circle' }])
+
+  assert.equal(chart.getMarkers()[0].index, -1,
+    'resolution happens in the frame, not in setMarkers')
+  frame(chart)
+  assert.equal(chart.getMarkers()[0].index, 20)
+  chart.destroy()
+})
+
+test('double-click resets zoom and autoscale, not just the scroll position', () => {
+  const chart = createChart(makeContainer())
+  chart.setData(makeBars(T0, 300, MIN))
+  frame(chart)
+
+  const defaultSpacing = chart.ts.spacing
+  chart.ts.zoomAt(200, 3)
+  chart.ps.scaleBy(2)          // manual price scaling clears auto
+  for (let i = 0; i < 400; i++) { chart.ts.tick(16); chart.ps.tick(16) }
+  assert.notEqual(chart.ts.spacing, defaultSpacing)
+  assert.equal(chart.ps.auto, false)
+
+  chart._onDbl()
+  for (let i = 0; i < 400; i++) { chart.ts.tick(16); chart.ps.tick(16) }
+
+  assert.ok(Math.abs(chart.ts.spacing - defaultSpacing) < 0.01, 'zoom must return to default')
+  assert.equal(chart.ps.auto, true, 'and the price scale must resume autoscaling')
+  assert.equal(chart.ts.follow, true)
+  chart.destroy()
+})

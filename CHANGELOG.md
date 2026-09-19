@@ -3,6 +3,52 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-09-19
+
+Documentation only. No runtime change; the README ships inside the package,
+so correcting it means publishing it.
+
+### Docs
+
+- **The entry-points table still advertised `emberwick/umd` as an import.**
+  0.6.0 removed that subpath deliberately — a UMD file loaded as an ES module
+  exports nothing — so the table was pointing at a specifier that now throws.
+- **The marker-thinning threshold was stated in the wrong unit.** Thinning
+  starts when a candle *body* is 3px or less, which is about 5.6px per bar,
+  not 3px per bar: a body is 72% of its slot.
+- **Double-click does more than snap to realtime.** It also resets the zoom to
+  the default spacing and returns the price scale to autoscale.
+- **`feed.destroy()` is the caller's to invoke.** The chart never calls it;
+  `detachFeed()` and `chart.destroy()` only run the unsubscribe function that
+  `subscribe()` returned.
+- **`getMarkers().index` is `-1` until a frame has run**, because resolution
+  happens in the render frame rather than in `setMarkers()`. `-1` also means
+  *deliberately hidden* for a marker outside the loaded range, so it reads as
+  "not drawn" rather than "not yet known". Marker id stability is documented
+  alongside it.
+- **The `markers`, `priceLines` and `zones` constructor options** have been
+  implemented and typed since annotations landed, and documented nowhere.
+- **`chart.visibleRange()`** was described in prose but missing from the
+  methods table.
+- **Zones had no field table** — `from`/`to`, `fromTime`/`toTime`, `color`,
+  `border` and `label` are all read by the renderer.
+- **Lazy history's page size is fixed at 1000**, which `initialBars` does not
+  control, and a failed page now retries. Neither was written down.
+- **`setData()` ends an active replay** and detaches the controller, so a held
+  reference silently stops working. Same for a second `startReplay()`.
+- **The source-layout block** omitted `replay/` and `overlays/` and named
+  playground files that have since moved.
+- **Known gaps** rewritten: the session-gap entry described collapsing as if
+  it were the missing feature, when collapsing is the behaviour and *session
+  marking* is what is absent. Added the lack of timezone control and the
+  ESM-only constraint.
+
+### Added
+
+- Three tests pinning the newly documented surface: the constructor
+  annotation options, the `getMarkers()` resolution timing, and what
+  double-click actually resets. 72 tests.
+
 ## [0.6.0] — 2026-09-19
 
 The surface matches the docs. Every change here is a place where the
