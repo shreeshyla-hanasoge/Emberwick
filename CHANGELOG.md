@@ -3,6 +3,71 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-09-19
+
+The surface matches the docs. Every change here is a place where the
+advertised behaviour and the shipped behaviour disagreed. Minor rather than
+patch: three of them change what an existing integrator sees.
+
+### Changed
+
+- **Wheel and pinch zoom are cursor-anchored on charts with no live feed.**
+  The right-edge lock was keyed on `follow`, and `setData()` sets `follow` —
+  so it applied to *every* fresh chart, including a static historical one,
+  and silently defeated the cursor anchoring the README advertises. Measured
+  drift on a fresh 900px chart was 26 bars. It self-healed after a single
+  pixel of pan, which is why it read as intermittent rather than as a rule.
+  The lock now requires an attached feed, so a live chart still holds the
+  newest candle in place and a static one zooms where you point.
+- **`upFill` / `downFill` now colour the candle bodies.** They were
+  documented, typed as required and shipped in both built-in themes, and read
+  by nothing. They fall back to `up` / `down` when unset, so a theme that
+  colours via `up` is unaffected — and they are now optional in the type, and
+  gone from the built-in themes. `up` / `down` continue to drive the
+  last-price line and the price tag, which is what makes a separate body key
+  worth having.
+- **The React adapter compares `data` by content, not identity.** React hands
+  a wrapper a new array identity on every render, and `setData()` re-anchors
+  to the right edge — so the README's own `onCrosshair -> setState` example
+  threw away the user's pan and zoom on every mouse sample. An unchanged array
+  is now ignored, a moved last bar is merged as a tick, bars appended to the
+  same history are appended, and only a genuinely different dataset
+  re-anchors. The decision lives in `adapters/react/dataPlan.js`, which
+  imports nothing and is framework-agnostic.
+
+### Fixed
+
+- **A devicePixelRatio change is detected.** `measure()` read the ratio but
+  its only callers were the constructor and a ResizeObserver, which does not
+  fire when a window moves to a different-DPI monitor at the same logical
+  size — so the dpr branch of its own guard was unreachable and the canvases
+  stayed blurry. A resolution media query now watches for it, re-arming each
+  time, and is removed on `destroy()`. Guarded for environments with no
+  `matchMedia`.
+- **`import 'emberwick/umd'` no longer silently does nothing.** The UMD file
+  is a `.js` under `"type": "module"`, so importing it exported zero bindings
+  and quietly assigned `globalThis.Emberwick`. The `./umd` subpath is gone
+  from the exports map, so that import now fails loudly. The file is
+  unchanged and unmoved — `unpkg` and `jsdelivr` still serve it to `<script>`
+  tags, which is all it was ever for.
+
+### Added
+
+- **`chart.resize()`** — re-measure now, for layout the element cannot
+  observe (a container revealed from `display:none`, an ancestor transition).
+- Test harness: a **recording canvas context**, plus `drawnValues()`,
+  `clearOps()` and `setDevicePixelRatio()`. Canvas output was previously
+  invisible to tests, which is why "does this theme key do anything?" had no
+  answer for twenty of them.
+- 10 more mutants (38 total), all caught.
+
+### Docs
+
+- Emberwick is **ESM-only**; `require()` reports that as `No "exports" main
+  defined`. Documented, with the `await import()` and UMD alternatives.
+- The zoom claim now states the live-feed exception; the React section
+  describes the content comparison and notes that `options` is read once.
+
 ## [0.5.1] — 2026-09-19
 
 Fixes regressions introduced by 0.5.0. **Upgrade from 0.5.0.** Three of these

@@ -6,8 +6,6 @@ export const defaultTheme = {
   textStrong: '#e6e9ef',
   up: '#26a69a',
   down: '#ef5350',
-  upFill: '#26a69a',
-  downFill: '#ef5350',
   wickUp: '#26a69a',
   wickDown: '#ef5350',
   volumeUp: 'rgba(38,166,154,0.30)',

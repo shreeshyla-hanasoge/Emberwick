@@ -47,7 +47,11 @@ export function drawCandles(ctx, s) {
     if (x < -bw || x > plot.w + bw) continue
 
     const up = b.close >= b.open
-    const color = up ? theme.up : theme.down
+    // Body fill only. theme.up/down also drive the last-price line and the
+    // price tag, so upFill/downFill are the escape hatch for theming the
+    // bodies independently — falling back to up/down when unset, which is
+    // what keeps a theme that only sets `up` looking exactly as it did.
+    const color = up ? theme.upFill || theme.up : theme.downFill || theme.down
     const yO = ps.y(b.open)
     const yC = ps.y(b.close)
     const yH = ps.y(b.high)

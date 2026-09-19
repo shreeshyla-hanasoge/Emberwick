@@ -25,8 +25,10 @@ export interface Theme {
   textStrong: string
   up: string
   down: string
-  upFill: string
-  downFill: string
+  /** Candle BODY fill. Falls back to `up` when unset. */
+  upFill?: string
+  /** Candle BODY fill. Falls back to `down` when unset. */
+  downFill?: string
   wickUp: string
   wickDown: string
   volumeUp: string
@@ -451,6 +453,12 @@ export declare class Chart {
    * last error through the 'error' event; fix the cause, then call this.
    * Returns false if the chart is destroyed or the loop is already running.
    */
+  /**
+   * Re-measure the container and canvases now. Resizes and devicePixelRatio
+   * changes are detected automatically; this is the escape hatch for layout
+   * the element cannot observe, such as being revealed from display:none.
+   */
+  resize(): void
   resume(): boolean
   destroy(): void
 

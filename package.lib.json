@@ -1,6 +1,6 @@
 {
   "name": "emberwick",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Smooth flowing candlestick charts for the web — canvas-rendered, zero-dependency, pluggable data feeds.",
   "license": "MIT",
   "author": "Shreeshyla Hanasoge <shreeshyla.hanasoge@gmail.com>",
@@ -34,7 +34,6 @@
       "types": "./webcomponent.d.ts",
       "import": "./webcomponent.js"
     },
-    "./umd": "./umd/emberwick.umd.js",
     "./package.json": "./package.json"
   },
   "peerDependencies": {

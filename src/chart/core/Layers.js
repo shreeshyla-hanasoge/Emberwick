@@ -40,6 +40,41 @@ export class Layers {
     this._ro = new ResizeObserver(() => this.measure())
     this._ro.observe(container)
     this.measure()
+    this._watchDpr()
+  }
+
+  /**
+   * Detect a devicePixelRatio change.
+   *
+   * ResizeObserver does not fire when a window moves to a different-DPI
+   * monitor at the same logical size, and measure()'s only other caller is
+   * the constructor — so the dpr branch of its guard was unreachable and the
+   * canvases stayed at the old ratio, visibly blurry until something else
+   * happened to resize them.
+   *
+   * A resolution query stops matching the moment the ratio moves, so the
+   * listener has to be re-armed against the new value each time.
+   */
+  _watchDpr() {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const arm = () => {
+      const dpr = window.devicePixelRatio || 1
+      this._dprQuery = window.matchMedia(`(resolution: ${dpr}dppx)`)
+      this._onDpr = () => {
+        this.measure()
+        arm()
+      }
+      this._dprQuery.addEventListener('change', this._onDpr, { once: true })
+    }
+    arm()
+  }
+
+  _unwatchDpr() {
+    if (this._dprQuery && this._onDpr) {
+      this._dprQuery.removeEventListener('change', this._onDpr)
+    }
+    this._dprQuery = null
+    this._onDpr = null
   }
 
   measure() {
@@ -71,6 +106,7 @@ export class Layers {
   }
 
   destroy() {
+    this._unwatchDpr()
     this._ro.disconnect()
     for (const n of this.names) this.canvas[n].remove()
     this.canvas = {}

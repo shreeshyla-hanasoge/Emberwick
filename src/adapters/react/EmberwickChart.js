@@ -1,5 +1,6 @@
 import { createElement, forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { createChart } from '../../chart/index.js'
+import { planDataUpdate } from './dataPlan.js'
 
 /**
  * React adapter.
@@ -36,6 +37,8 @@ export const EmberwickChart = forwardRef(function EmberwickChart(props, ref) {
   const hostRef = useRef(null)
   const chartRef = useRef(null)
   const crosshairRef = useRef(onCrosshair)
+  /** Fingerprint of the bars last handed to the chart — see the data effect. */
+  const appliedRef = useRef(null)
 
   // Keep the latest callback without re-subscribing on every render.
   crosshairRef.current = onCrosshair
@@ -71,8 +74,30 @@ export const EmberwickChart = forwardRef(function EmberwickChart(props, ref) {
   }), [])
 
   // --- prop -> chart wiring -------------------------------------------------
+  /**
+   * `data` is compared by CONTENT, not identity.
+   *
+   * React gives a new array identity on every render when the caller writes
+   * an inline literal, and setData() re-anchors to the right edge, clears the
+   * price scale's primed flag and resets the live candle. Keyed on identity,
+   * the README's own `onCrosshair -> setState` example therefore threw away
+   * the user's pan and zoom on every mouse sample.
+   *
+   * Three shapes are recognised, cheapest first: unchanged (do nothing), the
+   * forming candle moved (update), and bars appended to the same history
+   * (append each). Anything else is a genuinely new dataset and re-anchors,
+   * which is what setData is for.
+   */
   useEffect(() => {
-    if (chartRef.current && data) chartRef.current.setData(data)
+    const chart = chartRef.current
+    if (!chart || !data) return
+
+    const plan = planDataUpdate(appliedRef.current, data)
+    if (plan.action === 'update') chart.update(data[data.length - 1])
+    else if (plan.action === 'append') {
+      for (let i = plan.from; i < data.length; i++) chart.append(data[i])
+    } else if (plan.action === 'replace') chart.setData(data)
+    appliedRef.current = plan.next
   }, [data])
 
   useEffect(() => {

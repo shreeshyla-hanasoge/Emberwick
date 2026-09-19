@@ -8,6 +8,8 @@ point it at your own market data.
 - **Framework-agnostic.** Works in React, Vue, Svelte, or a plain `<script type="module">`.
 - **Actually smooth.** Ticks ease into the forming candle, the price axis glides
   to new bounds, zoom is cursor-anchored and eased, panning has inertia.
+  (While a live feed is attached and the chart is following realtime, zoom
+  holds the right edge instead, so the newest candle stays put.)
 - **Fast on big data.** One `requestAnimationFrame` loop, dirty-flag driven,
   with visible-range culling — 500k bars loaded costs only the ~200 on screen.
 - **Annotated.** Nine marker shapes, price lines and shaded zones, with
@@ -38,7 +40,14 @@ import { createChart, RandomFeed } from 'emberwick'
 </script>
 ```
 
-The UMD build is core-only and exposes the global `Emberwick`.
+The UMD build is core-only and exposes the global `Emberwick`. It is for
+`<script>` tags and CDNs only — there is deliberately no `emberwick/umd`
+import specifier, because a UMD file loaded as an ES module exports nothing
+and quietly assigns a global instead.
+
+> **Emberwick is ESM-only.** `import` works everywhere; `require('emberwick')`
+> does not, and Node reports that as `No "exports" main defined`. Use a dynamic
+> `await import('emberwick')` from CommonJS, or the UMD build above.
 
 ### By vendoring the source
 
@@ -237,6 +246,7 @@ const chart = createChart(el, {
 | `replayState()` | Current playback state. `{ active: false, ... }` when not replaying |
 | `chart.replay` | Getter — the active `Replay` controller, or `null` |
 | `toImage()` | PNG data URL of the composited layers |
+| `resize()` | Re-measure the container now. Resizes and pixel-ratio changes are automatic |
 | `resume()` | Restart the render loop after it gave up. See below |
 | `destroy()` | Remove listeners, stop the loop, drop canvases |
 | `chart.fps` | Getter — measured frames per second |
@@ -588,7 +598,14 @@ Props: `data`, `feed`, `options`, `theme`, `priceMode`, `animate`, `magnet`,
 
 The component creates the chart **once** and drives it through its methods on
 prop changes — it never rebuilds the canvas, so pan/zoom position and animation
-state survive re-renders. `destroy()` runs on unmount, so React 18 StrictMode
+state survive re-renders. `data` is compared by **content**, not identity, so
+passing an inline array literal is safe: an unchanged array is ignored, a moved
+last bar is merged as a tick, and bars appended to the same history are
+appended rather than re-anchoring the view. Only a genuinely different dataset
+snaps back to the right edge.
+
+`options` is read once, when the chart is created. Change `theme`, `priceMode`,
+`animate` or `magnet` through their own props instead. `destroy()` runs on unmount, so React 18 StrictMode
 double-mounting is safe.
 
 ### React — by hand

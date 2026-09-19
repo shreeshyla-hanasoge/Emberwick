@@ -21,6 +21,14 @@ export class TimeScale {
     this.width = 0
     this.barCount = 0
     this.follow = true
+    /**
+     * True only while a live feed is attached. The right-edge zoom lock below
+     * is for charts where new candles keep arriving; a static chart follows
+     * realtime too — setData() snaps it there — so keying the lock on `follow`
+     * alone applied it to every fresh chart and silently broke the
+     * cursor-anchored zoom the README advertises.
+     */
+    this.live = false
     this.timeframeMs = 60000
     this._spacing = new Smoothed(spacing, 65)
     this._right = new Smoothed(rightOffset, 65)
@@ -84,9 +92,10 @@ export class TimeScale {
     const s1 = clamp(s0 * factor, this.minSpacing, this.maxSpacing)
     if (Math.abs(s1 - s0) < 1e-9) return false
 
-    // While following realtime, pin the right edge instead of the cursor so the
-    // latest candle stays put — that is what traders expect.
-    const anchorX = this.follow ? this.width : x
+    // While following a LIVE feed, pin the right edge instead of the cursor so
+    // the latest candle stays put — that is what traders expect. With no feed
+    // there is no incoming candle to keep in view, so the cursor wins.
+    const anchorX = this.follow && this.live ? this.width : x
     const r0 = this._right.target
     const idx = r0 - (this.width - anchorX) / s0
     const r1 = idx + (this.width - anchorX) / s1

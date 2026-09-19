@@ -294,6 +294,7 @@ export class Chart {
     // setData() has already coerced a non-array to [], and prime() is
     // documented as taking Bar | undefined.
     if (typeof feed.prime === 'function') feed.prime(this.bars[this.bars.length - 1])
+    this.ts.live = true // new candles are coming: hold the right edge on zoom
     this._unsub = feed.subscribe((msg) => {
       if (!msg || !msg.bar) return
       // A subscription that outlived its generation must never write bars —
@@ -313,6 +314,7 @@ export class Chart {
     this._loadingHistory = false
     this._historyErrors = 0
     this._exhausted = false // the next feed gets a clean slate
+    this.ts.live = false
     if (this._unsub) this._unsub()
     this._unsub = null
     this.feed = null
@@ -931,6 +933,19 @@ export class Chart {
     if (this._destroyed || this.loop.running) return false
     this.loop.start()
     return true
+  }
+
+  /**
+   * Re-measure the container and canvases now.
+   *
+   * Resizes and devicePixelRatio changes are detected automatically; this is
+   * the escape hatch for the cases that are not observable from inside the
+   * element — a CSS transition on an ancestor, a container revealed from
+   * display:none, or a layout the host framework drives imperatively.
+   */
+  resize() {
+    if (this._destroyed) return
+    this.layers.measure()
   }
 
   toImage() {

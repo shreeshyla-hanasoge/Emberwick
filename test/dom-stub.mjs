@@ -8,21 +8,51 @@
  */
 const noop = () => {}
 
-function makeCtx() {
-  return new Proxy(
-    { measureText: () => ({ width: 10 }), canvas: null },
-    { get: (t, k) => (k in t ? t[k] : noop) }
-  )
+/**
+ * A 2D context that records what was drawn.
+ *
+ * Canvas output is otherwise invisible to a test, which is why "does this
+ * theme key do anything?" had no answer for twenty of them. Every method call
+ * and every property assignment lands in `ops`, so a test can assert on the
+ * fills and strokes a frame actually produced.
+ */
+function makeCtx(ops) {
+  const base = { measureText: () => ({ width: 10 }), canvas: null }
+  return new Proxy(base, {
+    get(t, k) {
+      if (k in t) return t[k]
+      return (...args) => { ops.push({ op: k, args }); }
+    },
+    set(t, k, v) {
+      ops.push({ op: 'set', prop: k, value: v })
+      t[k] = v
+      return true
+    },
+  })
 }
 
 export function makeCanvas() {
+  const ops = []
   return {
     style: {},
     width: 0,
     height: 0,
-    getContext: () => makeCtx(),
+    /** Everything drawn to this canvas, in order. */
+    ops,
+    getContext: () => makeCtx(ops),
     remove: noop,
   }
+}
+
+/** Values assigned to `prop` (e.g. 'fillStyle') on a chart layer this frame. */
+export function drawnValues(chart, layer, prop) {
+  const canvas = chart.layers.canvas[layer]
+  return canvas.ops.filter((o) => o.op === 'set' && o.prop === prop).map((o) => o.value)
+}
+
+/** Clear the recorded ops on every layer — call before the frame you care about. */
+export function clearOps(chart) {
+  for (const name of chart.layers.names) chart.layers.canvas[name].ops.length = 0
 }
 
 export function makeContainer({ width = 900, height = 500 } = {}) {
@@ -48,7 +78,30 @@ export function installDom() {
   set('document', { createElement: () => makeCanvas() })
   set('getComputedStyle', () => ({ position: 'relative' }))
   set('ResizeObserver', class { observe() {} disconnect() {} })
-  set('window', { devicePixelRatio: 1 })
+  // A drivable matchMedia: `setDevicePixelRatio()` below fires the listeners
+  // a real browser would fire when a window moves to a different-DPI monitor.
+  const queries = new Set()
+  set('window', {
+    devicePixelRatio: 1,
+    matchMedia: (query) => {
+      const mq = {
+        media: query,
+        matches: true,
+        _listeners: new Set(),
+        addEventListener(_type, fn, opts) {
+          mq._once = !!(opts && opts.once)
+          mq._listeners.add(fn)
+          queries.add(mq)
+        },
+        removeEventListener(_type, fn) {
+          mq._listeners.delete(fn)
+          queries.delete(mq)
+        },
+      }
+      return mq
+    },
+  })
+  globalThis.__dprQueries = queries
   // Never fires: tests drive state directly, so no frame can race an assert.
   set('requestAnimationFrame', () => 1)
   set('cancelAnimationFrame', noop)
@@ -77,6 +130,22 @@ export function settle(chart, max = 600, dt = 16) {
   let n = 0
   while (n < max && frame(chart, dt)) n++
   return n
+}
+
+/**
+ * Change the device pixel ratio and notify anything watching for it, the way
+ * dragging a window to a different-DPI monitor does.
+ */
+export function setDevicePixelRatio(dpr) {
+  globalThis.window.devicePixelRatio = dpr
+  for (const mq of [...(globalThis.__dprQueries || [])]) {
+    mq.matches = false
+    for (const fn of [...mq._listeners]) {
+      if (mq._once) mq._listeners.delete(fn)
+      fn({ matches: false, media: mq.media })
+    }
+    if (mq._once) globalThis.__dprQueries.delete(mq)
+  }
 }
 
 /** Ascending, de-duplicated bars — the documented feed contract. */

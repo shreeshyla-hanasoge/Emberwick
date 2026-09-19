@@ -66,9 +66,16 @@ else if (m[1] !== manifest.version) {
        '(bump src/chart/index.js and package.lib.json together)')
 } else ok(`version ${manifest.version} consistent between manifest and bundle`)
 
-/** The UMD build must actually define the global it advertises. */
-const umdRel = typeof manifest.exports?.['./umd'] === 'string' ? manifest.exports['./umd'] : null
-if (umdRel && existsSync(resolve(out, umdRel))) {
+/**
+ * The UMD build must actually define the global it advertises.
+ *
+ * Read from `unpkg`, not the exports map: the ./umd subpath was deliberately
+ * removed (importing a UMD file as ESM exports nothing and writes a global),
+ * and keying this check on it meant the check silently stopped running.
+ */
+const umdRel = typeof manifest.unpkg === 'string' ? manifest.unpkg : null
+if (!umdRel) fail('no unpkg entry — the CDN build is unadvertised')
+else if (existsSync(resolve(out, umdRel))) {
   const umd = await readFile(resolve(out, umdRel), 'utf8')
   if (umd.includes('Emberwick')) ok('UMD bundle defines the Emberwick global')
   else fail('UMD bundle does not mention the Emberwick global')
