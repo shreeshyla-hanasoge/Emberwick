@@ -3,6 +3,56 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-09-20
+
+What a finished dataset needs that a live chart does not: the whole run in
+view, and labels in the zone the session is defined in.
+
+### Added
+
+- **`chart.fitContent()`** — zoom and scroll so the whole dataset is on
+  screen. The opening move for a backtest or a replay tape, where the useful
+  first view is the entire run rather than the last hundred bars at the
+  default zoom. Returns false when there are fewer than two bars.
+
+  Deliberately **not animated**: easing 4,000 bars from 9px each down to 0.2
+  reads as a glitch, not as polish — the same reason a drag uses `jump()`.
+
+  Fitting is allowed to zoom out past `timeScale.minSpacing`, and lowers it to
+  match. That bound exists to stop a wheel gesture burying the chart in mush;
+  an explicit "show me everything" is a different intent, and clamping it
+  would both hide part of the dataset and leave the next zoom-in jumping
+  discontinuously back up to the old floor.
+
+- **`timeZone` option and `chart.setTimeZone(zone)`** — format every rendered
+  timestamp in an IANA zone rather than the browser's. An NSE chart opens at
+  09:15 whoever is reading it.
+
+  Display only: bar times, the crosshair payload, `visibleRange()` and marker
+  times all stay in the ms epochs you supplied. `Intl.DateTimeFormat`
+  instances are memoised per zone, because these run once per axis label per
+  frame.
+
+- **Day-boundary labels.** The first label of each new day shows the date
+  instead of the time, in the configured zone. The old rule printed a date
+  only at local midnight — a moment intraday instruments never trade — so a
+  multi-day intraday chart rendered a wall of times with no indication of
+  where one session ended.
+
+### Changed
+
+- The time formatters are now built per chart (`createTimeFormatter`) and
+  passed through the frame state, rather than imported directly by
+  `render/grid.js` and `render/crosshair.js`.
+
+### Notes
+
+- The zone formatter asks for `hourCycle: 'h23'` rather than
+  `hour12: false`, which has historically resolved to `h24` in some engines
+  and rendered midnight as `24:00`.
+- Landing page: two new feature cards, and the roadmap updated.
+- 14 tests and 12 mutants. 114 tests, 70/70 mutants caught.
+
 ## [0.7.0] — 2026-09-20
 
 **Line series.** Emberwick can draw something other than candles.

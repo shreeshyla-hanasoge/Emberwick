@@ -3,6 +3,12 @@ import { Smoothed } from '../motion/Tween.js'
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v)
 
 /**
+ * Hard floor on bars-per-pixel, whatever fitContent is asked to fit. Below
+ * this the arithmetic stops being meaningful long before the pixels do.
+ */
+const FIT_FLOOR = 0.02
+
+/**
  * TimeScale — maps bar index <-> x pixels.
  *
  * Two smoothed values define the view:
@@ -102,6 +108,32 @@ export class TimeScale {
 
     this._spacing.set(s1)
     this._right.set(this._clampRight(r1))
+    return true
+  }
+
+  /**
+   * Set the zoom so `barCount` bars span the plot, with the last at the right
+   * edge. Returns false when there is nothing to fit.
+   *
+   * Deliberately NOT eased. Easing a 4,000-bar dataset from 9px per bar down
+   * to 0.2 reads as a glitch rather than as polish, and the caller asked for
+   * a view, not an animation — the same reason a drag uses jump().
+   *
+   * Fitting is allowed to zoom out past `minSpacing`, and lowers it to match.
+   * minSpacing exists to stop a wheel gesture burying the chart in mush; an
+   * explicit "show me everything" is a different intent, and clamping it
+   * would both hide part of the dataset and leave the next zoom-in jumping
+   * discontinuously back up to the old floor.
+   */
+  fitContent(barCount) {
+    const n = Math.floor(barCount)
+    if (!(n > 1) || !(this.width > 0)) return false
+    const needed = this.width / n
+    if (needed < this.minSpacing) this.minSpacing = Math.max(needed, FIT_FLOOR)
+    this._spacing.jump(clamp(needed, this.minSpacing, this.maxSpacing))
+    // No rightOffset: fitting the content means the newest bar IS the edge.
+    this._right.jump(n - 1)
+    this.follow = true
     return true
   }
 

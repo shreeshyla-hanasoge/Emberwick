@@ -1,4 +1,4 @@
-import { decimalsFor, priceTicks, fmtDateTime } from '../core/formatters.js'
+import { decimalsFor, priceTicks } from '../core/formatters.js'
 
 /**
  * Crosshair lives alone on the top canvas: moving the pointer repaints only
@@ -59,7 +59,7 @@ export function drawCrosshair(ctx, s) {
 
   // time tag
   if (bar) {
-    const t = fmtDateTime(bar.time)
+    const t = s.fmt.full(bar.time)
     ctx.textAlign = 'center'
     const tw = ctx.measureText(t).width
     const bx = Math.min(Math.max(x, tw / 2 + 6), plot.w - tw / 2 - 6)

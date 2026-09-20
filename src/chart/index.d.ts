@@ -201,6 +201,11 @@ export interface PriceScaleOptions {
 }
 
 export interface ChartOptions {
+  /**
+   * IANA time zone for every rendered timestamp, e.g. 'Asia/Kolkata'.
+   * Defaults to the browser's local zone. Display only.
+   */
+  timeZone?: string
   /** Partial theme merged over defaultTheme. */
   theme?: Partial<Theme>
   /** Share of plot height used by the volume strip. Default 0.18. */
@@ -518,6 +523,21 @@ export declare class Chart {
    * changes are detected automatically; this is the escape hatch for layout
    * the element cannot observe, such as being revealed from display:none.
    */
+  /**
+   * Zoom and scroll so the whole dataset is on screen. Not animated.
+   * Returns false when there are fewer than two bars to fit.
+   *
+   * Fitting is allowed to zoom out past `timeScale.minSpacing`, and lowers it
+   * to match — that bound governs interactive zoom, not an explicit fit.
+   */
+  fitContent(): boolean
+  /**
+   * Format every rendered timestamp in `zone` — an IANA name such as
+   * 'Asia/Kolkata', or null for the browser's local zone. Display only: bar
+   * times, the crosshair payload and visibleRange stay in the ms epochs you
+   * supplied.
+   */
+  setTimeZone(zone: string | null): this
   resize(): void
   resume(): boolean
   destroy(): void

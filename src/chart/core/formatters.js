@@ -83,3 +83,93 @@ export function fmtVolume(v) {
   if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K'
   return String(Math.round(v))
 }
+
+/* ------------------------------------------------------------ time zones -- */
+
+/**
+ * Intl.DateTimeFormat instances are expensive to construct and cheap to
+ * reuse, and these run once per axis label per frame. Memoising is a
+ * correctness-adjacent requirement here, not an optimisation.
+ */
+const intlCache = new Map()
+function intl(timeZone, options) {
+  const key = timeZone + '|' + JSON.stringify(options)
+  let f = intlCache.get(key)
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-GB', { timeZone, ...options })
+    intlCache.set(key, f)
+  }
+  return f
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * Build the set of time formatters a chart renders with.
+ *
+ * With no `timeZone` this is the browser's local zone, using plain Date
+ * getters — the fast path, and the behaviour every existing chart has.
+ *
+ * With one, every rendered timestamp is formatted in that zone. This matters
+ * for any instrument whose session is defined in exchange-local time: an NSE
+ * chart read in London should still open at 09:15, and a chart whose epochs
+ * encode exchange wall time needs to be told which zone that was.
+ *
+ *   axis(ms, tfMs) -> time of day, or a date for daily-and-coarser bars
+ *   date(ms)       -> '20 Sep'
+ *   full(ms)       -> '2026-09-20 09:15', for the crosshair
+ *   dayKey(ms)     -> an integer that changes exactly when the day does
+ */
+export function createTimeFormatter(timeZone) {
+  if (!timeZone) {
+    return {
+      zone: null,
+      axis: fmtAxisTime,
+      full: fmtDateTime,
+      date: (ms) => {
+        const d = new Date(ms)
+        return `${d.getDate()} ${MONTHS[d.getMonth()]}`
+      },
+      dayKey: (ms) => {
+        const d = new Date(ms)
+        return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+      },
+    }
+  }
+
+  const fmt = intl(timeZone, {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    // h23 rather than hour12:false — the latter has historically resolved to
+    // h24 in some engines, which renders midnight as 24:00. Asking for the
+    // cycle we want is better than normalising a value we did not.
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  })
+  const parts = (ms) => {
+    const out = {}
+    for (const p of fmt.formatToParts(ms)) if (p.type !== 'literal') out[p.type] = p.value
+    return out
+  }
+
+  const date = (ms) => {
+    const p = parts(ms)
+    return `${Number(p.day)} ${MONTHS[Number(p.month) - 1]}`
+  }
+
+  return {
+    zone: timeZone,
+    date,
+    axis: (ms, tfMs) => {
+      if (tfMs >= 864e5) return date(ms)
+      const p = parts(ms)
+      return `${p.hour}:${p.minute}`
+    },
+    full: (ms) => {
+      const p = parts(ms)
+      return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`
+    },
+    dayKey: (ms) => {
+      const p = parts(ms)
+      return Number(p.year) * 10000 + Number(p.month) * 100 + Number(p.day)
+    },
+  }
+}

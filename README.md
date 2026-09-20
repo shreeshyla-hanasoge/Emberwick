@@ -263,6 +263,8 @@ const chart = createChart(el, {
 | `replayState()` | Current playback state. `{ active: false, ... }` when not replaying |
 | `chart.replay` | Getter — the active `Replay` controller, or `null` |
 | `toImage()` | PNG data URL of the composited layers |
+| `fitContent()` | Zoom and scroll so the whole dataset is on screen. Not animated |
+| `setTimeZone(zone)` | Format every rendered timestamp in an IANA zone, or `null` for local |
 | `resize()` | Re-measure the container now. Resizes and pixel-ratio changes are automatic |
 | `resume()` | Restart the render loop after it gave up. See below |
 | `destroy()` | Remove listeners, stop the loop, drop canvases |
@@ -640,6 +642,47 @@ chart.setZones([
 Autoscale fits the **bars**, not the annotations — a price line far outside the
 data range is simply off-screen. Derive extreme values from the visible range
 if you need them guaranteed visible.
+
+---
+
+## Time zones
+
+Axis labels and the crosshair read in the browser's local zone by default.
+Pass a zone when the instrument's session is defined somewhere else:
+
+```js
+const chart = createChart(el, { timeZone: 'Asia/Kolkata' })
+chart.setTimeZone('UTC')   // or change it later
+```
+
+An NSE chart then opens at 09:15 whoever is reading it. This is **display
+only** — bar times, the crosshair payload, `visibleRange()` and marker times
+stay in the ms epochs you supplied.
+
+The first label of each new day shows the date rather than the time, in the
+same zone. Without that, a multi-day intraday chart is a wall of times with no
+indication of where one session ends — a day boundary is only midnight for
+instruments that trade through it, which intraday ones do not.
+
+---
+
+## Fitting the view
+
+```js
+chart.setData(bars)
+chart.fitContent()
+```
+
+The opening move for a finished dataset — a backtest, a replay tape — where
+the useful first view is the whole run rather than the last hundred bars at
+the default zoom. It is deliberately **not** animated: easing 4,000 bars from
+9px each down to 0.2 reads as a glitch, not as polish.
+
+Fitting is allowed to zoom out past `timeScale.minSpacing` and lowers it to
+match. That bound exists to stop a wheel gesture burying the chart in mush; an
+explicit "show me everything" is a different intent, and clamping it would
+both hide part of the dataset and make the next zoom-in jump back up to the
+old floor.
 
 ---
 

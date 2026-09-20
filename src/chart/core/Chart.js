@@ -1,3 +1,4 @@
+import { createTimeFormatter } from './formatters.js'
 import { Layers } from './Layers.js'
 import { Loop } from './Loop.js'
 import { TimeScale } from './TimeScale.js'
@@ -107,6 +108,11 @@ export class Chart {
      * it here means a Chart is never reactive, whoever stores it.
      */
     this.__v_skip = true
+    /**
+     * Every rendered timestamp goes through this. Browser-local by default;
+     * options.timeZone pins it to an exchange's zone instead.
+     */
+    this.fmt = createTimeFormatter(options.timeZone)
     this.theme = { ...defaultTheme, ...(options.theme || {}) }
     this.options = {
       volumeRatio: 0.18,
@@ -978,6 +984,7 @@ export class Chart {
       priceLines: this.priceLines,
       zones: this.zones,
       series: visibleSeries,
+      fmt: this.fmt,
     }
 
     // Markers past the replay cursor are future information — hidden, not
@@ -1050,6 +1057,23 @@ export class Chart {
     this.loop.invalidate('overlay')
   }
 
+  /**
+   * Zoom and scroll so the whole dataset is on screen.
+   *
+   * The normal opening move for a finished dataset — a backtest, a replay
+   * tape — where the useful first view is the whole run, not the last hundred
+   * bars at the default zoom. Not animated: see TimeScale#fitContent.
+   *
+   * Returns false when there are fewer than two bars to fit.
+   */
+  fitContent() {
+    if (this._destroyed) return false
+    if (!this.ts.fitContent(this.bars.length)) return false
+    this.ps.resetAuto()
+    this.loop.invalidate('all')
+    return true
+  }
+
   snapToRealtime() {
     this.ts.snapToRealtime()
     this.ps.resetAuto()
@@ -1078,6 +1102,20 @@ export class Chart {
    * element — a CSS transition on an ancestor, a container revealed from
    * display:none, or a layout the host framework drives imperatively.
    */
+  /**
+   * Format every rendered timestamp in `zone` — an IANA name such as
+   * 'Asia/Kolkata', or null for the browser's local zone.
+   *
+   * Display only. Bar times remain the ms epochs you supplied, and everything
+   * the chart hands back — the crosshair payload, visibleRange, marker times
+   * — is still in those terms.
+   */
+  setTimeZone(zone) {
+    this.fmt = createTimeFormatter(zone || null)
+    this.loop.invalidate('all')
+    return this
+  }
+
   resize() {
     if (this._destroyed) return
     this.layers.measure()

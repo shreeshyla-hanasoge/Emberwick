@@ -540,6 +540,14 @@ const FEATURES = [
     d: 'startReplay() turns any loaded dataset into a tape you can scrub, step and play at 0.25×–500×. Bars are revealed through the same animated path a live tick takes, so backtesting playback looks exactly like the market did.',
   },
   {
+    t: 'Series, not just candles',
+    d: 'setSeries() draws any y-value over the same time axis — a moving average, a VWAP, an equity curve. Keyed, so updating one leaves the rest alone, and a point with no value lifts the pen instead of pretending the line went to zero.',
+  },
+  {
+    t: 'Built for finished datasets',
+    d: 'fitContent() puts a whole backtest on screen in one call, and timeZone formats every label in the exchange\u2019s zone — so an NSE chart opens at 09:15 whoever is reading it, with the day boundaries marked.',
+  },
+  {
     t: 'Any data source',
     d: 'The DataFeed interface is the whole integration: implement getBars() and subscribe() and the chart works. REST, WebSocket, Lambda, a CSV in memory — the core never knows the difference.',
   },
@@ -724,7 +732,7 @@ export default function Landing() {
       {/* ---- hero ---- */}
       <section className="lp-hero">
         <span className="lp-pill">
-          <span className="lp-pulse" /> new in v0.7.0 — line series
+          <span className="lp-pulse" /> new in v0.8.0 — fit to content, time zones
         </span>
         <h1>
           Candlestick charts that
@@ -1068,8 +1076,8 @@ class MyFeed extends DataFeed {
       <section className="lp-section" id="roadmap">
         <h2>Where it's going</h2>
         <p className="lp-lede">
-          v0.7.0 adds line series on top of replay, the annotation layer, range
-          events and the motion core. Honest about what isn't there yet — here's
+          v0.8.0 adds fit-to-content and time-zone aware labels on top of line
+          series, replay, the annotation layer, range events and the motion core. Honest about what isn't there yet — here's
           the order it's coming in.
         </p>
         <div className="lp-road">

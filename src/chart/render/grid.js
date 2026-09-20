@@ -1,8 +1,8 @@
-import { priceTicks, decimalsFor, niceBarStep, fmtAxisTime } from '../core/formatters.js'
+import { priceTicks, decimalsFor, niceBarStep } from '../core/formatters.js'
 
 /** Background, grid, and both axes. Repaints only when the view changes. */
 export function drawGrid(ctx, s) {
-  const { theme, ts, ps, plot, bars, width, height } = s
+  const { theme, ts, ps, plot, bars, width, height, fmt } = s
 
   ctx.clearRect(0, 0, width, height)
   ctx.fillStyle = theme.background
@@ -63,12 +63,22 @@ export function drawGrid(ctx, s) {
     ctx.fillStyle = theme.text
     ctx.textAlign = 'center'
     const ty = plot.h + theme.timeAxisHeight / 2
+    // The first label of a new day shows the date instead of the time.
+    // Without it a multi-day intraday chart is nothing but times, with no
+    // clue where one session ends — the old rule only labelled a date at
+    // local midnight, which is a moment intraday instruments never trade.
+    let prevDay = null
+    const before = bars[Math.max(0, first - stepBars)]
+    if (before) prevDay = fmt.dayKey(before.time)
     for (let i = first; i <= to; i += stepBars) {
       const bar = bars[i]
       if (!bar) continue
+      const day = fmt.dayKey(bar.time)
+      const newDay = prevDay !== null && day !== prevDay
+      prevDay = day
       const x = Math.round(ts.x(i))
       if (x < 28 || x > plot.w - 28) continue
-      ctx.fillText(fmtAxisTime(bar.time, ts.timeframeMs), x, ty)
+      ctx.fillText(newDay ? fmt.date(bar.time) : fmt.axis(bar.time, ts.timeframeMs), x, ty)
     }
   }
 
