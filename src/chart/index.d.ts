@@ -95,9 +95,6 @@ export interface ResolvedMarker<T = unknown> extends Marker<T> {
 
 export type LineStyle = 'solid' | 'dashed' | 'dotted'
 
-/** A horizontal line at a fixed price. */
-export type LineStyle = 'solid' | 'dashed' | 'dotted'
-
 /**
  * One point of a series.
  *
@@ -139,6 +136,7 @@ export interface SeriesInfo {
   title: string
 }
 
+/** A horizontal line at a fixed price. */
 export interface PriceLine {
   id?: string
   price: number
