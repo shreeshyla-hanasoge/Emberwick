@@ -454,6 +454,76 @@ first pair of bars.
 
 ---
 
+## Series
+
+Candles are not the only thing worth drawing on a price axis. A **series** is
+an arbitrary y-value over the same time axis — a moving average, a VWAP, an
+equity curve, a band.
+
+```js
+chart.setSeries('ema20', {
+  data: [{ time: 1717070400000, value: 148.2 }, ...],
+  color: '#c084fc',
+})
+chart.setSeries('sma50', { data: sma50, color: '#38bdf8', lineWidth: 1 })
+```
+
+Series are **keyed**, so updating one leaves the rest alone — a panel of
+twelve indicators does not rebuild eleven of them to toggle the twelfth.
+Insertion order is draw order, and they paint over the candles but under
+price lines and markers.
+
+| Method | Description |
+|---|---|
+| `setSeries(id, options)` | Create, or update in place. Omit `data` to change only presentation |
+| `setSeriesData(id, points)` | Replace the points, keep the options |
+| `setSeriesVisible(id, bool)` | Hide without discarding. Hidden series do not autoscale |
+| `removeSeries(id)` | Drop one |
+| `clearSeries()` | Drop all |
+| `getSeries()` | Each series' resolved options, in draw order |
+
+| Option | Default | Notes |
+|---|---|---|
+| `data` | — | `{ time, value }[]`. `time` is ms epoch, resolved to the nearest bar |
+| `color` | `theme.textStrong` | |
+| `lineWidth` | `1.5` | |
+| `lineStyle` | `'solid'` | `'solid'`, `'dashed'`, `'dotted'` |
+| `stepped` | `false` | Draw as a step function instead of interpolating |
+| `visible` | `true` | |
+| `title` | — | Passthrough metadata for `getSeries()`. Never drawn |
+
+### Gaps
+
+**A point with no value lifts the pen.** `value` absent, `null`, or anything
+non-numeric ends the current line; the next valued point starts a fresh one.
+
+```js
+chart.setSeries('rsi', { data: [
+  { time: t0, value: 55.2 },
+  { time: t1 },              // no value here — the line breaks
+  { time: t2, value: 61.8 },
+]})
+```
+
+This is the one design decision worth stating plainly: a missing value is
+**never** drawn as zero and **never** interpolated across. An indicator with
+no value during its warm-up period is not an indicator sitting at zero, and a
+line that quietly connects across a gap is a line that lies about the data.
+
+### Scale
+
+Visible series widen the price scale along with the bars, so a value outside
+the candle range is in view rather than clipped at the edge. Hidden series are
+excluded from that. Points more than one timeframe outside the loaded bar
+range are not drawn at all, on the same reasoning as markers.
+
+Series share the price axis with the candles. An equity curve at 200,000
+against a price around 100 will technically render, but the candles will be a
+flat line — a second pane with its own scale is the answer, and it does not
+exist yet.
+
+---
+
 ## Annotations
 
 Three independent collections, each replaced wholesale. Zones paint behind the
@@ -868,9 +938,12 @@ Honest list of what isn't there yet:
   the hovered bar; rendering the readout is still yours to do.
 - **Markers are not draggable.** They are hit-tested for hover and click, but
   there is no drag-to-move or editing interaction.
-- **No indicators or drawing tools.** SMA/EMA/RSI/MACD, multi-pane layout and
-  trendlines are planned but not implemented.
-- **Candlesticks only.** No Heikin-Ashi, line, area or baseline series yet.
+- **No indicator maths, and no second pane.** Emberwick draws the line you
+  hand it — see [Series](#series) — but computing SMA/EMA/RSI/MACD is yours,
+  and an oscillator with its own scale has nowhere to live yet. Drawing tools
+  (trendlines, Fib) are not implemented.
+- **Candlesticks only, as a price type.** No Heikin-Ashi, and no area or
+  baseline fills — a series is a stroked line.
 - **No session awareness.** The time axis is indexed by bar, not by clock, so
   weekends and overnight closes collapse to an ordinary bar step — which is
   usually what you want. What is missing is the other half: nothing marks

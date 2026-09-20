@@ -239,6 +239,128 @@ function MarkersChart() {
   )
 }
 
+/* ---------------------------------------------------------------- series -- */
+/**
+ * Two EMAs over the same random walk, drawn as series.
+ *
+ * The warm-up period is the point of this demo: an EMA has no value for its
+ * first N bars, so those points carry no `value` and the line simply starts
+ * where the data does. That is the gap rule doing its job — nothing is drawn
+ * at zero, and nothing is interpolated across.
+ *
+ * The chips are wired to `setSeriesVisible`, which also drops the hidden
+ * series out of autoscale — watch the price axis when you toggle one off.
+ */
+const SERIES_DEFS = [
+  { id: 'ema9', label: 'EMA 9', period: 9, color: '#c084fc' },
+  { id: 'ema21', label: 'EMA 21', period: 21, color: '#38bdf8' },
+]
+
+/** EMA seeded with the SMA of its first window. Warm-up bars return null. */
+function emaSeries(bars, period) {
+  const k = 2 / (period + 1)
+  let prev
+  return bars.map((b, i) => {
+    if (i < period - 1) return { time: b.time } // no value yet — a gap
+    if (prev === undefined) {
+      let sum = 0
+      for (let j = 0; j < period; j++) sum += bars[j].close
+      prev = sum / period
+    } else {
+      prev = b.close * k + prev * (1 - k)
+    }
+    return { time: b.time, value: Number(prev.toFixed(2)) }
+  })
+}
+
+function SeriesChart() {
+  const hostRef = useRef(null)
+  const chartRef = useRef(null)
+  const [ready, setReady] = useState(false)
+  const [on, setOn] = useState(() => SERIES_DEFS.map(() => true))
+
+  useEffect(() => {
+    let disposed = false
+    const chart = createChart(hostRef.current, {
+      theme: { ...defaultTheme, background: '#0a0d15' },
+      timeScale: { spacing: 9, rightOffset: 6 },
+      priceScale: { marginTop: 0.18, marginBottom: 0.16 },
+    })
+    chartRef.current = chart
+
+    const feed = new RandomFeed({
+      symbol: 'EMBR',
+      timeframe: 60000,
+      seed: 20260920,
+      start: 128.4,
+      volatility: 0.0022,
+    })
+
+    feed
+      .getBars({ symbol: 'EMBR', timeframe: 60000, to: null, limit: 160 })
+      .then((bars) => {
+        if (disposed || !bars.length) return
+        chart.setData(bars)
+        for (const d of SERIES_DEFS) {
+          chart.setSeries(d.id, {
+            data: emaSeries(bars, d.period),
+            color: d.color,
+            lineWidth: 1.6,
+            title: d.label,
+          })
+        }
+        setReady(true)
+      })
+
+    return () => {
+      disposed = true
+      feed.destroy()
+      chart.destroy()
+      chartRef.current = null
+    }
+  }, [])
+
+  const toggle = (i) => {
+    const next = on.slice()
+    next[i] = !next[i]
+    setOn(next)
+    chartRef.current?.setSeriesVisible(SERIES_DEFS[i].id, next[i])
+  }
+
+  return (
+    <div className="lp-annochart">
+      <div className="lp-chartwrap">
+        <div className="lp-chartbar">
+          <span className="lp-dot lp-dot-a" />
+          <span className="lp-dot lp-dot-b" />
+          <span className="lp-dot lp-dot-c" />
+          <span className="lp-chartbar-title">EMBR · 1m · two EMAs</span>
+        </div>
+        <div className="lp-chart lp-chart-sm" ref={hostRef}>
+          {!ready && <div className="lp-chart-loading">computing averages…</div>}
+        </div>
+      </div>
+
+      <div className="lp-serieslegend">
+        {SERIES_DEFS.map((d, i) => (
+          <button
+            type="button"
+            key={d.id}
+            className={`lp-serieschip ${on[i] ? 'is-on' : ''}`}
+            onClick={() => toggle(i)}
+          >
+            <span className="lp-serieswatch" style={{ background: d.color }} />
+            {d.label}
+          </button>
+        ))}
+        <span className="lp-serieshint">
+          toggle one off — it leaves the price scale too
+        </span>
+      </div>
+    </div>
+  )
+}
+
 /* ---------------------------------------------------------------- replay -- */
 /**
  * The scrubber demoing itself. A fixed 420-bar dataset is replayed from its
@@ -589,6 +711,7 @@ export default function Landing() {
         <nav className="lp-navlinks">
           <a href="#features">Features</a>
           <a href="#replay">Replay</a>
+          <a href="#series">Series</a>
           <a href="#annotations">Annotations</a>
           <a href="#range">Range events</a>
           <a href="#usage">Usage</a>
@@ -601,7 +724,7 @@ export default function Landing() {
       {/* ---- hero ---- */}
       <section className="lp-hero">
         <span className="lp-pill">
-          <span className="lp-pulse" /> new in v0.4.0 — replay scrubber
+          <span className="lp-pulse" /> new in v0.7.0 — line series
         </span>
         <h1>
           Candlestick charts that
@@ -781,6 +904,40 @@ chart.subscribe('markerClick', (m) => openTicket(m.data.orderId))`}</pre>
       </section>
 
       {/* ---- range events ---- */}
+      <section className="lp-section" id="series">
+        <span className="lp-tag">new in v0.7.0</span>
+        <h2>Draw more than candles</h2>
+        <p className="lp-lede">
+          A series is any y-value over the same time axis — a moving average, a
+          VWAP, an equity curve. Keyed, so updating one leaves the other eleven
+          alone, and a point with no value lifts the pen instead of pretending
+          the line went to zero.
+        </p>
+
+        <div className="lp-annogrid">
+          <SeriesChart />
+
+          <div className="lp-code lp-annocode">
+            <div className="lp-codehead">Adding a series</div>
+            <pre>{`chart.setSeries('ema20', {
+  data: [{ time: 1717070400000, value: 148.2 }, ...],
+  color: '#c084fc',
+})
+
+// keyed: this touches nothing else on the chart
+chart.setSeriesData('ema20', nextPoints)
+chart.setSeriesVisible('ema20', false)
+
+// a point with no value BREAKS the line — it is not a zero
+chart.setSeries('rsi', { data: [
+  { time: t0, value: 55.2 },
+  { time: t1 },            // warm-up: no value yet
+  { time: t2, value: 61.8 },
+]})`}</pre>
+          </div>
+        </div>
+      </section>
+
       <section className="lp-section" id="range">
         <span className="lp-tag">v0.3.0</span>
         <h2>Know what&rsquo;s on screen</h2>
@@ -911,7 +1068,7 @@ class MyFeed extends DataFeed {
       <section className="lp-section" id="roadmap">
         <h2>Where it's going</h2>
         <p className="lp-lede">
-          v0.4.0 added bar-by-bar replay on top of the annotation layer, range
+          v0.7.0 adds line series on top of replay, the annotation layer, range
           events and the motion core. Honest about what isn't there yet — here's
           the order it's coming in.
         </p>

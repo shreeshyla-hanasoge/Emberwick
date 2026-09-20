@@ -1,6 +1,6 @@
 {
   "name": "emberwick",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "Smooth flowing candlestick charts for the web — canvas-rendered, zero-dependency, pluggable data feeds.",
   "license": "MIT",
   "author": "Shreeshyla Hanasoge <shreeshyla.hanasoge@gmail.com>",

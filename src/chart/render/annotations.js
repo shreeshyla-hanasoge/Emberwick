@@ -1,4 +1,5 @@
 import { decimalsFor, priceTicks, toNumber } from '../core/formatters.js'
+import { DASH } from './style.js'
 import { nearestIndex } from '../overlays/annotations.js'
 
 /**
@@ -6,7 +7,6 @@ import { nearestIndex } from '../overlays/annotations.js'
  * (in front of them). Each is a pure draw call over prepared state.
  */
 
-const DASH = { solid: [], dashed: [6, 4], dotted: [1, 3] }
 const DOWN_SHAPES = new Set(['arrowDown', 'triangleDown'])
 
 function roundRect(ctx, x, y, w, h, r) {

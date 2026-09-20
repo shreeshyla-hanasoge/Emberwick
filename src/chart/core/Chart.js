@@ -11,6 +11,13 @@ import { drawCandles } from '../render/candles.js'
 import { drawCrosshair } from '../render/crosshair.js'
 import { drawZones, drawPriceLines, drawMarkers } from '../render/annotations.js'
 import { normalizeMarkers, resolveMarkers, layoutMarkers } from '../overlays/annotations.js'
+import {
+  normalizeSeries,
+  normalizeSeriesPoints,
+  resolveSeriesPoints,
+  seriesExtent,
+} from '../overlays/series.js'
+import { drawSeries } from '../render/series.js'
 
 /** The 'replay' payload when nothing is being replayed. */
 const inactiveReplay = () => ({
@@ -149,6 +156,14 @@ export class Chart {
     this._markerHits = []
     this._hoverMarkerId = null
     this._resolveKey = ''
+    /**
+     * id -> { opts, points, drawable, resolveKey }
+     *
+     * A keyed registry rather than a one-shot setter, because a host toggling
+     * one indicator on a panel of twelve should not have to rebuild the other
+     * eleven. Insertion order is draw order.
+     */
+    this._series = new Map()
     // Per-listener dedupe. A single shared key let a LATE subscriber record
     // the current state as "already sent", so the next emit compared equal
     // and every EXISTING listener silently missed that update.
@@ -772,6 +787,85 @@ export class Chart {
     this._emitState('replay', this.replayState(), this._replayIdentity)
   }
 
+  // ---------------------------------------------------------------- series --
+  /**
+   * Create or update a series.
+   *
+   * A series is an arbitrary y-value over the bar time axis — an indicator
+   * overlay, an equity curve, anything expressible as { time, value }.
+   * Calling it again with the same id updates in place, so a host can toggle
+   * one of twelve indicators without rebuilding the rest. Insertion order is
+   * draw order.
+   *
+   *   chart.setSeries('ema20', { data: points, color: '#c084fc' })
+   *
+   * A point whose value is absent, null or non-numeric is a GAP: it lifts the
+   * pen rather than being drawn as zero or interpolated across.
+   */
+  setSeries(id, options = {}) {
+    if (id == null) throw new Error('Chart: setSeries() needs an id')
+    const key = String(id)
+    const existing = this._series.get(key)
+    const opts = normalizeSeries(options, key)
+    if (existing) {
+      existing.opts = opts
+      if ('data' in options) this._applySeriesData(existing, options.data)
+    } else {
+      const entry = {
+        opts,
+        points: [],
+        drawable: [],
+        resolveKey: '',
+      }
+      this._series.set(key, entry)
+      if ('data' in options) this._applySeriesData(entry, options.data)
+    }
+    this.loop.invalidate('main')
+    return this
+  }
+
+  /** Replace one series' points, leaving its presentation options alone. */
+  setSeriesData(id, points) {
+    const entry = this._series.get(String(id))
+    if (!entry) return this
+    this._applySeriesData(entry, points)
+    this.loop.invalidate('main')
+    return this
+  }
+
+  /** Show or hide a series. Hidden series do not influence autoscale. */
+  setSeriesVisible(id, visible) {
+    const entry = this._series.get(String(id))
+    if (!entry) return this
+    entry.opts.visible = visible !== false
+    this.loop.invalidate('main')
+    return this
+  }
+
+  removeSeries(id) {
+    if (this._series.delete(String(id))) this.loop.invalidate('main')
+    return this
+  }
+
+  clearSeries() {
+    if (this._series.size) {
+      this._series.clear()
+      this.loop.invalidate('main')
+    }
+    return this
+  }
+
+  /** Every series' options, in draw order. Point data is not copied. */
+  getSeries() {
+    return [...this._series.values()].map((e) => ({ ...e.opts }))
+  }
+
+  _applySeriesData(entry, points) {
+    entry.points = normalizeSeriesPoints(points)
+    entry.drawable = []
+    entry.resolveKey = '' // force re-resolution on the next frame
+  }
+
   // ----------------------------------------------------------- annotations --
   /** Replace every marker. Each `time` is resolved to its nearest bar. */
   setMarkers(markers) {
@@ -839,7 +933,33 @@ export class Chart {
     const liveBar = this.bars.length ? this.live.read(this.bars[lastIdx]) : null
     const liveVisible = liveBar && to >= lastIdx ? liveBar : null
 
-    this.ps.fit(this.bars, from, to, liveVisible)
+    // Series indices go stale for the same reasons marker indices do, plus
+    // whenever a series' own data is replaced — which is why they cannot
+    // share _resolveKey.
+    const barKey = this._barGen + ':' + this.bars.length
+    const visibleSeries = []
+    for (const entry of this._series.values()) {
+      // New data clears resolveKey outright, so this covers both causes:
+      // the bar array shifting, and the series' own points being replaced.
+      const key = barKey
+      if (key !== entry.resolveKey) {
+        entry.drawable = resolveSeriesPoints(entry.points, this.bars, this.ts.timeframeMs)
+        entry.resolveKey = key
+      }
+      if (entry.opts.visible) visibleSeries.push(entry)
+    }
+
+    // Autoscale over the bars AND every visible series: a value outside the
+    // candle range would otherwise be drawn and then clipped at the edge.
+    if (this.bars.length) {
+      this.ps.beginFit()
+      this.ps.considerBars(this.bars, from, to, liveVisible)
+      for (const entry of visibleSeries) {
+        const ext = seriesExtent(entry.drawable, from, to)
+        if (isFinite(ext.min)) this.ps.consider(ext.min, ext.max)
+      }
+      this.ps.endFit()
+    }
     if (this.ps.tick(dt)) animating = true
 
     const redrawAll = animating || dirty.has('all') || dirty.has('base') || dirty.has('main')
@@ -857,6 +977,7 @@ export class Chart {
       magnet: this.options.magnet,
       priceLines: this.priceLines,
       zones: this.zones,
+      series: visibleSeries,
     }
 
     // Markers past the replay cursor are future information — hidden, not
@@ -883,6 +1004,7 @@ export class Chart {
       drawGrid(this.layers.ctx.base, state)
       drawZones(this.layers.ctx.base, state)
       drawCandles(this.layers.ctx.main, state)
+      drawSeries(this.layers.ctx.main, state)
       drawPriceLines(this.layers.ctx.main, state)
       this._markerHits = drawMarkers(
         this.layers.ctx.main,
@@ -987,6 +1109,7 @@ export class Chart {
     for (const keys of Object.values(this._stateKeys)) keys.clear()
     if (this._replay) this._replay.detach()
     this._replay = null
+    this._series.clear()
     this._markers = []
     this._markerHits = []
     this.priceLines = []

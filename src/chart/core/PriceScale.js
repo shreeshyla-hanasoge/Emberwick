@@ -22,6 +22,8 @@ export class PriceScale {
     this._lo = new Smoothed(0, tau)
     this._hi = new Smoothed(1, tau)
     this._primed = false
+    this._fitMin = Infinity
+    this._fitMax = -Infinity
   }
 
   _fwd(v) { return this.mode === 'log' ? Math.log(Math.max(v, 1e-9)) : v }
@@ -86,24 +88,55 @@ export class PriceScale {
     return this.mode === 'log' && n <= 0 ? NaN : n
   }
 
-  /** Fit visible bars. `extra` lets the forming candle influence the range. */
-  fit(bars, from, to, extra) {
-    if (!this.auto || !bars.length) return
-    let min = Infinity
-    let max = -Infinity
-    // Compare the COERCED numbers, never the raw values.
-    const consider = (rawLo, rawHi) => {
-      const lo = this._price(rawLo)
-      const hi = this._price(rawHi)
-      if (!Number.isNaN(lo) && lo < min) min = lo
-      if (!Number.isNaN(hi) && hi > max) max = hi
-    }
+  /**
+   * Fitting is a three-step transaction so that more than one kind of thing
+   * can influence the range.
+   *
+   *   ps.beginFit()
+   *   ps.considerBars(bars, from, to, extra)
+   *   ps.consider(lo, hi)        // once per visible series, say
+   *   ps.endFit()
+   *
+   * Before this, fit() only ever looked at bar highs and lows, so any value
+   * that leaves the candle range — an oscillator, an equity curve, a
+   * Supertrend or a Bollinger band on a quiet stretch — was drawn and then
+   * clipped at the plot edge.
+   */
+  beginFit() {
+    this._fitMin = Infinity
+    this._fitMax = -Infinity
+  }
+
+  /** Widen the pending range. Non-prices are ignored, not coerced. */
+  consider(lo, hi) {
+    const a = this._price(lo)
+    const b = this._price(hi)
+    if (!Number.isNaN(a) && a < this._fitMin) this._fitMin = a
+    if (!Number.isNaN(b) && b > this._fitMax) this._fitMax = b
+  }
+
+  /** Widen the pending range by the visible bars. `extra` is the live candle. */
+  considerBars(bars, from, to, extra) {
     for (let i = from; i <= to; i++) {
       const b = bars[i]
       if (!b) continue
-      consider(b.low, b.high)
+      this.consider(b.low, b.high)
     }
-    if (extra) consider(extra.low, extra.high)
+    if (extra) this.consider(extra.low, extra.high)
+  }
+
+  /**
+   * Apply the pending range.
+   *
+   * Considering nothing plottable leaves the bounds AND `_primed` untouched,
+   * which is what lets a renderer decline to draw an axis rather than invent
+   * one. That used to be an accident of the isFinite guard; once every series
+   * on a chart can be hidden it stops being one.
+   */
+  endFit() {
+    if (!this.auto) return
+    const min = this._fitMin
+    const max = this._fitMax
     if (!isFinite(min) || !isFinite(max)) return
 
     let a = this._fwd(min)
@@ -126,6 +159,14 @@ export class PriceScale {
       this._hi.jump(b)
       this._primed = true
     }
+  }
+
+  /** Fit visible bars. `extra` lets the forming candle influence the range. */
+  fit(bars, from, to, extra) {
+    if (!this.auto || !bars.length) return
+    this.beginFit()
+    this.considerBars(bars, from, to, extra)
+    this.endFit()
   }
 
   /** Manual axis-drag scaling around the vertical centre. */

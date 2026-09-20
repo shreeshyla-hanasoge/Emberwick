@@ -1,3 +1,4 @@
+import { toNumber } from '../core/formatters.js'
 /**
  * Annotation model — normalisation, time→index resolution and collision
  * layout for markers.
@@ -57,14 +58,18 @@ const POSITIONS = new Set(['aboveBar', 'belowBar', 'inBar', 'atPrice'])
  */
 // eslint-disable-next-line no-unused-vars
 export function normalizeMarker(raw, i) {
-  if (!raw || !isFinite(raw.time)) return null
+  if (!raw) return null
+  // isFinite(null) is true and +null is 0 — a null time would place the
+  // marker at the epoch rather than rejecting it.
+  const time = toNumber(raw.time)
+  if (Number.isNaN(time)) return null
   const shape = SHAPE_SET.has(raw.shape) ? raw.shape : 'circle'
   const position = POSITIONS.has(raw.position)
     ? raw.position
     : DEFAULT_POSITION[shape] || 'aboveBar'
   return {
     id: raw.id != null ? String(raw.id) : null,
-    time: +raw.time,
+    time,
     price: isFinite(raw.price) ? +raw.price : null,
     shape,
     position,

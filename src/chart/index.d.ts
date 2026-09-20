@@ -96,6 +96,49 @@ export interface ResolvedMarker<T = unknown> extends Marker<T> {
 export type LineStyle = 'solid' | 'dashed' | 'dotted'
 
 /** A horizontal line at a fixed price. */
+export type LineStyle = 'solid' | 'dashed' | 'dotted'
+
+/**
+ * One point of a series.
+ *
+ * A point whose `value` is absent, null or non-numeric is a GAP: it lifts the
+ * pen, so the line ends there and the next valued point starts a fresh one.
+ * It is never drawn as zero and never interpolated across.
+ */
+export interface SeriesPoint {
+  /** ms since epoch, resolved to the nearest bar */
+  time: number
+  value?: number | string | null
+}
+
+export interface SeriesOptions {
+  /** Points. Omit to leave the existing data untouched. */
+  data?: SeriesPoint[]
+  /** Defaults to theme.textStrong. */
+  color?: string
+  /** Default 1.5. */
+  lineWidth?: number
+  /** Default 'solid'. */
+  lineStyle?: LineStyle
+  /** Draw as a step function rather than interpolating. Default false. */
+  stepped?: boolean
+  /** Default true. A hidden series is neither drawn nor autoscaled. */
+  visible?: boolean
+  /** Passthrough metadata, handed back by getSeries(). Never drawn. */
+  title?: string
+}
+
+/** A series' resolved options, as returned by getSeries(). */
+export interface SeriesInfo {
+  id: string
+  color: string | null
+  lineWidth: number
+  lineStyle: LineStyle
+  stepped: boolean
+  visible: boolean
+  title: string
+}
+
 export interface PriceLine {
   id?: string
   price: number
@@ -389,6 +432,21 @@ export declare class Chart {
   detachFeed(): void
 
   /** Replace every marker. */
+  /**
+   * Create or update a series — an arbitrary y-value over the bar time axis.
+   * Calling it again with the same id updates in place. Insertion order is
+   * draw order. Throws if `id` is null or undefined.
+   */
+  setSeries(id: string, options?: SeriesOptions): this
+  /** Replace one series' points, leaving its presentation options alone. */
+  setSeriesData(id: string, points: SeriesPoint[]): this
+  /** Show or hide a series. Hidden series do not influence autoscale. */
+  setSeriesVisible(id: string, visible: boolean): this
+  removeSeries(id: string): this
+  clearSeries(): this
+  /** Every series' options, in draw order. Point data is not included. */
+  getSeries(): SeriesInfo[]
+
   setMarkers(markers: Marker[]): void
   /** Current markers, normalised, each with its resolved bar index. */
   getMarkers(): ResolvedMarker[]

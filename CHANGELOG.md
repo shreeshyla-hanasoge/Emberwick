@@ -3,6 +3,61 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-09-20
+
+**Line series.** Emberwick can draw something other than candles.
+
+### Added
+
+- **`chart.setSeries(id, options)`** and friends — an arbitrary y-value over
+  the bar time axis: a moving average, a VWAP, an equity curve, a band.
+
+  ```js
+  chart.setSeries('ema20', { data: points, color: '#c084fc' })
+  chart.setSeriesData('ema20', nextPoints)
+  chart.setSeriesVisible('ema20', false)
+  chart.removeSeries('ema20')
+  chart.clearSeries()
+  chart.getSeries()
+  ```
+
+  Series are **keyed**, so a host toggling one indicator on a panel of twelve
+  does not rebuild the other eleven. Insertion order is draw order; they paint
+  over the candles and under price lines and markers.
+
+  Options: `data`, `color`, `lineWidth`, `lineStyle`, `stepped`, `visible`,
+  `title`.
+
+- **A point with no value lifts the pen.** `value` absent, `null` or
+  non-numeric ends the current line, and the next valued point starts a fresh
+  one. It is never drawn as zero and never interpolated across. An indicator
+  in its warm-up period has no value; that is not the same as a value of zero,
+  and a line that quietly joins across a gap lies about the data.
+
+- **Series drive autoscale.** A visible series widens the price range along
+  with the bars, so a value outside the candle range is in view rather than
+  clipped at the plot edge. Hidden series are excluded.
+
+- **`PriceScale` fitting is now a transaction** — `beginFit()`, `consider()`,
+  `considerBars()`, `endFit()` — so more than one kind of thing can influence
+  the range. `fit()` is unchanged as a thin wrapper.
+
+- Landing page: a **Series** section with two live EMAs, a legend wired to
+  `setSeriesVisible`, and the warm-up gap visible in the data.
+
+### Fixed
+
+- **A null `time` no longer places a marker at the epoch.** `isFinite(null)`
+  is true and `+null` is 0, so `{ time: null }` silently became a marker at
+  1970. Marker and series times both coerce through `toNumber` now.
+
+### Notes
+
+- Series share the price axis with the candles. An equity curve at 200,000
+  against a price near 100 will render, but the candles become a flat line —
+  a second pane with its own scale is the answer, and it does not exist yet.
+- No indicator maths. Emberwick draws the line you hand it.
+
 ## [0.6.2] — 2026-09-20
 
 Hardening for real consumer data. Two of these crash the chart outright on
