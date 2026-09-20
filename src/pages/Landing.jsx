@@ -361,6 +361,126 @@ function SeriesChart() {
   )
 }
 
+/* ----------------------------------------------------------------- view -- */
+/**
+ * Three NSE sessions, 09:15 to 15:30, with the overnight closes between them.
+ *
+ * Two things are on show and they reinforce each other. `fitContent()` puts
+ * all three days on screen at once; the time-zone chips relabel every tick
+ * without touching the data. Read it in Kolkata and the sessions open at
+ * 09:15; read it in New York and the same bars open at 23:45 the evening
+ * before — which is exactly why a chart cannot just use the browser's zone.
+ *
+ * The date labels between sessions are the day-boundary rule: the old
+ * behaviour printed a date only at local midnight, which intraday
+ * instruments never trade through.
+ */
+const ZONES = [
+  { id: 'Asia/Kolkata', label: 'Mumbai' },
+  { id: 'UTC', label: 'UTC' },
+  { id: 'America/New_York', label: 'New York' },
+]
+const SESSION_BARS = 240
+
+/** Reshape a continuous walk into NSE sessions: 09:15 IST, three days. */
+function sessionBars(walk) {
+  const open = Date.UTC(2026, 8, 16, 3, 45) // 09:15 Asia/Kolkata
+  return walk.slice(0, SESSION_BARS * 3).map((b, i) => ({
+    ...b,
+    time: open + Math.floor(i / SESSION_BARS) * 86400000 + (i % SESSION_BARS) * 60000,
+  }))
+}
+
+function ViewChart() {
+  const hostRef = useRef(null)
+  const chartRef = useRef(null)
+  const [ready, setReady] = useState(false)
+  const [zone, setZone] = useState(ZONES[0].id)
+  const [fitted, setFitted] = useState(false)
+
+  useEffect(() => {
+    let disposed = false
+    const chart = createChart(hostRef.current, {
+      theme: { ...defaultTheme, background: '#0a0d15' },
+      timeZone: ZONES[0].id,
+      timeScale: { spacing: 9, rightOffset: 4 },
+      priceScale: { marginTop: 0.16, marginBottom: 0.14 },
+    })
+    chartRef.current = chart
+
+    const feed = new RandomFeed({
+      symbol: 'NIFTY',
+      timeframe: 60000,
+      seed: 20260916,
+      start: 24180,
+      volatility: 0.0009,
+    })
+
+    feed
+      .getBars({ symbol: 'NIFTY', timeframe: 60000, to: null, limit: SESSION_BARS * 3 })
+      .then((bars) => {
+        if (disposed || !bars.length) return
+        chart.setData(sessionBars(bars))
+        setReady(true)
+      })
+
+    return () => {
+      disposed = true
+      feed.destroy()
+      chart.destroy()
+      chartRef.current = null
+    }
+  }, [])
+
+  const pickZone = (id) => {
+    setZone(id)
+    chartRef.current?.setTimeZone(id)
+  }
+
+  const fit = () => {
+    if (chartRef.current?.fitContent()) setFitted(true)
+  }
+
+  return (
+    <div className="lp-annochart">
+      <div className="lp-chartwrap">
+        <div className="lp-chartbar">
+          <span className="lp-dot lp-dot-a" />
+          <span className="lp-dot lp-dot-b" />
+          <span className="lp-dot lp-dot-c" />
+          <span className="lp-chartbar-title">NIFTY · 1m · three sessions</span>
+        </div>
+        <div className="lp-chart lp-chart-sm" ref={hostRef}>
+          {!ready && <div className="lp-chart-loading">loading sessions…</div>}
+        </div>
+      </div>
+
+      <div className="lp-serieslegend">
+        <button
+          type="button"
+          className={`lp-serieschip ${fitted ? '' : 'is-on'}`}
+          onClick={fit}
+        >
+          fitContent()
+        </button>
+        {ZONES.map((z) => (
+          <button
+            type="button"
+            key={z.id}
+            className={`lp-serieschip ${zone === z.id ? 'is-on' : ''}`}
+            onClick={() => pickZone(z.id)}
+          >
+            {z.label}
+          </button>
+        ))}
+        <span className="lp-serieshint">
+          {fitted ? 'double-click the chart to reset the zoom' : 'fit all three days, then switch zones'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 /* ---------------------------------------------------------------- replay -- */
 /**
  * The scrubber demoing itself. A fixed 420-bar dataset is replayed from its
@@ -720,6 +840,7 @@ export default function Landing() {
           <a href="#features">Features</a>
           <a href="#replay">Replay</a>
           <a href="#series">Series</a>
+          <a href="#view">Sessions</a>
           <a href="#annotations">Annotations</a>
           <a href="#range">Range events</a>
           <a href="#usage">Usage</a>
@@ -942,6 +1063,35 @@ chart.setSeries('rsi', { data: [
   { time: t1 },            // warm-up: no value yet
   { time: t2, value: 61.8 },
 ]})`}</pre>
+          </div>
+        </div>
+      </section>
+
+      <section className="lp-section" id="view">
+        <span className="lp-tag">new in v0.8.0</span>
+        <h2>Whose clock is it?</h2>
+        <p className="lp-lede">
+          A finished dataset wants the whole run on screen, and a session
+          defined in Mumbai should read as 09:15 wherever it is opened. One
+          call for each — and the dates between sessions appear because a day
+          boundary is not midnight for anything that stops trading overnight.
+        </p>
+
+        <div className="lp-annogrid">
+          <ViewChart />
+
+          <div className="lp-code lp-annocode">
+            <div className="lp-codehead">Framing a finished dataset</div>
+            <pre>{`const chart = createChart(el, {
+  timeZone: 'Asia/Kolkata',
+})
+
+chart.setData(bars)
+chart.fitContent()        // the whole run, in one call
+
+// display only — bar times, the crosshair payload
+// and visibleRange() stay in the epochs you gave
+chart.setTimeZone('UTC')`}</pre>
           </div>
         </div>
       </section>
