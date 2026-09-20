@@ -530,6 +530,33 @@ so this supersedes 0.4.0 for anyone attaching a `DataFeed`.
   collision-aware stacking and hover/click hit-testing.
 - `'visibleRange'` state event and `chart.visibleRange()`.
 
+## [0.3.0] — 2026-09-18
+
+Backfilled. This release predates the changelog, which began at 0.4.1;
+reconstructed from the published tarball rather than from memory.
+
+### Added
+
+- **The `'visibleRange'` event** and `chart.visibleRange()`. A *state* event: a
+  new subscriber is called immediately with the current window, then only when
+  that window actually changes. `spacing` is reported but deliberately excluded
+  from the change test — it is a float that moves every frame of an eased
+  zoom, so keying on it would make this a 60/sec firehose. `settled` IS part of
+  the test, so the last event of a gesture always arrives with `settled: true`.
+
+## [0.2.0] — 2026-09-18
+
+Backfilled, as above.
+
+### Added
+
+- **Annotations**: `setMarkers`, `getMarkers`, `addMarker`, `removeMarker`,
+  `clearMarkers`, `setPriceLines`, `setZones` and `markerAt(x, y)`. Nine marker
+  shapes, horizontal price lines and shaded zones, with collision-aware
+  stacking and hit-testing behind the `'markerHover'` and `'markerClick'`
+  events. Markers carry a timestamp rather than an index, so they re-resolve
+  when the bar array shifts.
+
 ## [0.1.0] — 2026-09-16
 
 First public release: canvas candlestick core, `DataFeed` seam, `RandomFeed`,

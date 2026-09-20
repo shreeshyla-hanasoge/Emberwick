@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Landing from './pages/Landing.jsx'
 import Playground from './pages/Playground.jsx'
 
@@ -18,10 +18,18 @@ function currentView() {
 
 export default function App() {
   const [view, setView] = useState(currentView)
+  const viewRef = useRef(view)
 
   useEffect(() => {
     const onHash = () => {
-      setView(currentView())
+      const next = currentView()
+      // Only reset the scroll when the VIEW changes. Every in-page anchor —
+      // #panes, #series, the whole nav — is also a hashchange, and resetting
+      // on those meant the browser jumped to the section and this handler
+      // immediately yanked it back to the top. The nav silently did nothing.
+      if (next === viewRef.current) return
+      viewRef.current = next
+      setView(next)
       window.scrollTo(0, 0)
     }
     window.addEventListener('hashchange', onHash)

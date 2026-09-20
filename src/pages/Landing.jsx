@@ -273,6 +273,24 @@ function emaSeries(bars, period) {
   })
 }
 
+/**
+ * A section's version tag.
+ *
+ * Exactly one section — the current release — gets the accent treatment and
+ * the same pulsing dot as the hero pill. Everything older reads "since vX" in
+ * muted grey: "new in" has a shelf life of one release, and four sections all
+ * shouting "new in" is how "new in v0.4.0" came to look like the latest news.
+ */
+function VersionTag({ v }) {
+  return v === CURRENT_RELEASE ? (
+    <span className="lp-tag lp-tag-new">
+      <span className="lp-pulse" /> new in v{v}
+    </span>
+  ) : (
+    <span className="lp-tag lp-tag-since">since v{v}</span>
+  )
+}
+
 function SeriesChart() {
   const hostRef = useRef(null)
   const chartRef = useRef(null)
@@ -375,6 +393,9 @@ function SeriesChart() {
  * behaviour printed a date only at local midnight, which intraday
  * instruments never trade through.
  */
+/** The release whose tag is accented. Everything else reads "since". */
+const CURRENT_RELEASE = '0.9.0'
+
 const ZONES = [
   { id: 'Asia/Kolkata', label: 'Mumbai' },
   { id: 'UTC', label: 'UTC' },
@@ -757,7 +778,7 @@ function CopyLine({ text }) {
 }
 
 const STATS = [
-  { v: '8.3', u: 'KB', l: 'gzipped UMD core' },
+  { v: '15.8', u: 'KB', l: 'gzipped UMD core' },
   { v: '0', u: '', l: 'dependencies' },
   { v: '60', u: 'fps', l: 'with a live feed' },
   { v: 'MIT', u: '', l: 'licensed' },
@@ -780,6 +801,10 @@ const FEATURES = [
   {
     t: 'Replay built in',
     d: 'startReplay() turns any loaded dataset into a tape you can scrub, step and play at 0.25×–500×. Bars are revealed through the same animated path a live tick takes, so backtesting playback looks exactly like the market did.',
+  },
+  {
+    t: 'A scale per pane',
+    d: 'Oscillators get their own band with their own price scale, sharing the time axis. RSI on 0\u2013100 sits under a price near 24,000 without flattening the candles into a line.',
   },
   {
     t: 'Series, not just candles',
@@ -939,7 +964,7 @@ function RangeChart() {
 }
 
 const ROADMAP = [
-  { t: 'Indicators & panes', d: 'SMA, EMA, VWAP, RSI, MACD in resizable sub-panes, plus a plugin hook for your own.', next: true },
+  { t: 'Indicator library', d: 'SMA, EMA, VWAP, RSI and MACD as first-class calls on top of series and panes \u2014 plus resizable, reorderable panes and a plugin hook for your own.', next: true },
   { t: 'Drawing tools', d: 'Trendlines, Fibonacci, position tool — with hit-testing, undo/redo and serialisable state.' },
   { t: 'Chart-type morphing', d: 'Animate candlestick → Heikin-Ashi → line as an eased transition rather than a redraw.' },
   { t: 'Session gaps', d: 'Collapse weekends and closed sessions instead of rendering them as ordinary bar steps.' },
@@ -960,12 +985,12 @@ export default function Landing() {
         </a>
         <nav className="lp-navlinks">
           <a href="#features">Features</a>
-          <a href="#replay">Replay</a>
-          <a href="#series">Series</a>
           <a href="#panes">Panes</a>
           <a href="#view">Sessions</a>
+          <a href="#series">Series</a>
+          <a href="#replay">Replay</a>
           <a href="#annotations">Annotations</a>
-          <a href="#range">Range events</a>
+          <a href="#range">Range</a>
           <a href="#usage">Usage</a>
           <a href="#roadmap">Roadmap</a>
           <a href={NPM_URL} target="_blank" rel="noreferrer">npm</a>
@@ -985,7 +1010,7 @@ export default function Landing() {
         </h1>
         <p className="lp-sub">
           A canvas charting core for financial frontends. Ticks ease in, axes glide,
-          panning carries momentum — and the whole thing is 8.3&nbsp;KB gzipped with
+          panning carries momentum — and the whole thing is 15.8&nbsp;KB gzipped with
           zero dependencies. Plug in your own data feed and drop it into any stack.
         </p>
 
@@ -1023,9 +1048,113 @@ export default function Landing() {
         </div>
       </section>
 
+
+
+
+
+
+
+      {/* ---- usage ---- */}
+      {/* Feature sections run NEWEST FIRST, so the version tags descend as you
+          scroll and the current release is the first one you meet. Only the
+          newest carries an accent tag; see VersionTag. */}
+      {/* ---- panes ---- */}
+      <section className="lp-section" id="panes">
+        <VersionTag v="0.9.0" />
+        <h2>A scale of its own</h2>
+        <p className="lp-lede">
+          RSI lives on 0–100. This instrument trades near 24,000. On one scale
+          the candles flatten into a line and the oscillator hugs the floor — so
+          a pane is a band of the plot with its own price scale, sharing the
+          time axis. Toggle it onto the price scale and watch it break.
+        </p>
+
+        <div className="lp-annogrid">
+          <PanesChart />
+
+          <div className="lp-code lp-annocode">
+            <div className="lp-codehead">Adding a pane</div>
+            <pre>{`chart.addPane('rsi', { weight: 1 })
+
+chart.setSeries('rsi14', {
+  data: points,
+  pane: 'rsi',
+  color: '#c084fc',
+})
+
+// an unknown pane throws rather than quietly
+// putting RSI-at-50 on a 24,000 scale
+chart.paneScale('rsi').y(70)   // where 70 sits
+chart.paneRect('rsi')          // { x, y, w, h }`}</pre>
+          </div>
+        </div>
+      </section>
+      {/* ---- view ---- */}
+      <section className="lp-section" id="view">
+        <VersionTag v="0.8.0" />
+        <h2>Whose clock is it?</h2>
+        <p className="lp-lede">
+          A finished dataset wants the whole run on screen, and a session
+          defined in Mumbai should read as 09:15 wherever it is opened. One
+          call for each — and the dates between sessions appear because a day
+          boundary is not midnight for anything that stops trading overnight.
+        </p>
+
+        <div className="lp-annogrid">
+          <ViewChart />
+
+          <div className="lp-code lp-annocode">
+            <div className="lp-codehead">Framing a finished dataset</div>
+            <pre>{`const chart = createChart(el, {
+  timeZone: 'Asia/Kolkata',
+})
+
+chart.setData(bars)
+chart.fitContent()        // the whole run, in one call
+
+// display only — bar times, the crosshair payload
+// and visibleRange() stay in the epochs you gave
+chart.setTimeZone('UTC')`}</pre>
+          </div>
+        </div>
+      </section>
+      {/* ---- series ---- */}
+      <section className="lp-section" id="series">
+        <VersionTag v="0.7.0" />
+        <h2>Draw more than candles</h2>
+        <p className="lp-lede">
+          A series is any y-value over the same time axis — a moving average, a
+          VWAP, an equity curve. Keyed, so updating one leaves the other eleven
+          alone, and a point with no value lifts the pen instead of pretending
+          the line went to zero.
+        </p>
+
+        <div className="lp-annogrid">
+          <SeriesChart />
+
+          <div className="lp-code lp-annocode">
+            <div className="lp-codehead">Adding a series</div>
+            <pre>{`chart.setSeries('ema20', {
+  data: [{ time: 1717070400000, value: 148.2 }, ...],
+  color: '#c084fc',
+})
+
+// keyed: this touches nothing else on the chart
+chart.setSeriesData('ema20', nextPoints)
+chart.setSeriesVisible('ema20', false)
+
+// a point with no value BREAKS the line — it is not a zero
+chart.setSeries('rsi', { data: [
+  { time: t0, value: 55.2 },
+  { time: t1 },            // warm-up: no value yet
+  { time: t2, value: 61.8 },
+]})`}</pre>
+          </div>
+        </div>
+      </section>
       {/* ---- replay ---- */}
       <section className="lp-section" id="replay">
-        <span className="lp-tag">new in v0.4.0</span>
+        <VersionTag v="0.4.0" />
         <h2>Rewind the tape</h2>
         <p className="lp-lede">
           Turn any dataset the chart already holds into playback: scrub it, step it
@@ -1085,10 +1214,66 @@ chart.stopReplay()        // back to the full dataset`}</pre>
           </div>
         </div>
       </section>
+      {/* ---- range ---- */}
+      <section className="lp-section" id="range">
+        <VersionTag v="0.3.0" />
+        <h2>Know what&rsquo;s on screen</h2>
+        <p className="lp-lede">
+          One subscription reports the window the user is actually looking at —
+          bar indices, timestamps and pixels per bar. Paginate history, sync a
+          second chart, switch timeframe, or drive an overview strip like the
+          one below.
+        </p>
 
+        <div className="lp-rangegrid">
+          <RangeChart />
+        </div>
+
+        <div className="lp-annofacts">
+          <div className="lp-annofact">
+            <h3>Answers immediately</h3>
+            <p>
+              A state event, not a notification: your handler is called the
+              moment you subscribe, with the window as it already stands.
+              Nothing waits for the user to touch the chart first.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>No debounce needed</h3>
+            <p>
+              Indices are integers, so a slow drag emits a handful of events
+              rather than one per frame. <code>spacing</code> is reported but
+              deliberately kept out of the change test — easing it would fire
+              sixty times a second.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Survives new history</h3>
+            <p>
+              Timestamps are part of the identity, so prepending an older page
+              re-emits even though <code>from</code> is still zero. A
+              pagination guard cannot get itself stuck.
+            </p>
+          </div>
+        </div>
+
+        <div className="lp-code lp-rangecode">
+          <div className="lp-codehead">Paginating on demand</div>
+          <pre>{`// with a feed attached the chart paginates on its own —
+// this is the manual path, for when you own the data
+chart.subscribe('visibleRange', async (r) => {
+  if (!r.settled || r.from > 50 || loading) return   // wait for the glide to stop
+
+  loading = true
+  const older = await api.candles({ to: r.fromTime, limit: 500 })
+  chart.setData(older.concat(chart.bars))
+  loading = false
+})`}</pre>
+        </div>
+      </section>
       {/* ---- annotations ---- */}
       <section className="lp-section" id="annotations">
-        <span className="lp-tag">v0.3.0</span>
+        <VersionTag v="0.2.0" />
         <h2>Mark up the chart</h2>
         <p className="lp-lede">
           Trades, events, targets and bands — three calls, no extra layer to manage.
@@ -1155,159 +1340,6 @@ chart.subscribe('markerClick', (m) => openTicket(m.data.orderId))`}</pre>
         </div>
       </section>
 
-      {/* ---- range events ---- */}
-      <section className="lp-section" id="series">
-        <span className="lp-tag">new in v0.7.0</span>
-        <h2>Draw more than candles</h2>
-        <p className="lp-lede">
-          A series is any y-value over the same time axis — a moving average, a
-          VWAP, an equity curve. Keyed, so updating one leaves the other eleven
-          alone, and a point with no value lifts the pen instead of pretending
-          the line went to zero.
-        </p>
-
-        <div className="lp-annogrid">
-          <SeriesChart />
-
-          <div className="lp-code lp-annocode">
-            <div className="lp-codehead">Adding a series</div>
-            <pre>{`chart.setSeries('ema20', {
-  data: [{ time: 1717070400000, value: 148.2 }, ...],
-  color: '#c084fc',
-})
-
-// keyed: this touches nothing else on the chart
-chart.setSeriesData('ema20', nextPoints)
-chart.setSeriesVisible('ema20', false)
-
-// a point with no value BREAKS the line — it is not a zero
-chart.setSeries('rsi', { data: [
-  { time: t0, value: 55.2 },
-  { time: t1 },            // warm-up: no value yet
-  { time: t2, value: 61.8 },
-]})`}</pre>
-          </div>
-        </div>
-      </section>
-
-      <section className="lp-section" id="panes">
-        <span className="lp-tag">new in v0.9.0</span>
-        <h2>A scale of its own</h2>
-        <p className="lp-lede">
-          RSI lives on 0–100. This instrument trades near 24,000. On one scale
-          the candles flatten into a line and the oscillator hugs the floor — so
-          a pane is a band of the plot with its own price scale, sharing the
-          time axis. Toggle it onto the price scale and watch it break.
-        </p>
-
-        <div className="lp-annogrid">
-          <PanesChart />
-
-          <div className="lp-code lp-annocode">
-            <div className="lp-codehead">Adding a pane</div>
-            <pre>{`chart.addPane('rsi', { weight: 1 })
-
-chart.setSeries('rsi14', {
-  data: points,
-  pane: 'rsi',
-  color: '#c084fc',
-})
-
-// an unknown pane throws rather than quietly
-// putting RSI-at-50 on a 24,000 scale
-chart.paneScale('rsi').y(70)   // where 70 sits
-chart.paneRect('rsi')          // { x, y, w, h }`}</pre>
-          </div>
-        </div>
-      </section>
-
-      <section className="lp-section" id="view">
-        <span className="lp-tag">new in v0.8.0</span>
-        <h2>Whose clock is it?</h2>
-        <p className="lp-lede">
-          A finished dataset wants the whole run on screen, and a session
-          defined in Mumbai should read as 09:15 wherever it is opened. One
-          call for each — and the dates between sessions appear because a day
-          boundary is not midnight for anything that stops trading overnight.
-        </p>
-
-        <div className="lp-annogrid">
-          <ViewChart />
-
-          <div className="lp-code lp-annocode">
-            <div className="lp-codehead">Framing a finished dataset</div>
-            <pre>{`const chart = createChart(el, {
-  timeZone: 'Asia/Kolkata',
-})
-
-chart.setData(bars)
-chart.fitContent()        // the whole run, in one call
-
-// display only — bar times, the crosshair payload
-// and visibleRange() stay in the epochs you gave
-chart.setTimeZone('UTC')`}</pre>
-          </div>
-        </div>
-      </section>
-
-      <section className="lp-section" id="range">
-        <span className="lp-tag">v0.3.0</span>
-        <h2>Know what&rsquo;s on screen</h2>
-        <p className="lp-lede">
-          One subscription reports the window the user is actually looking at —
-          bar indices, timestamps and pixels per bar. Paginate history, sync a
-          second chart, switch timeframe, or drive an overview strip like the
-          one below.
-        </p>
-
-        <div className="lp-rangegrid">
-          <RangeChart />
-        </div>
-
-        <div className="lp-annofacts">
-          <div className="lp-annofact">
-            <h3>Answers immediately</h3>
-            <p>
-              A state event, not a notification: your handler is called the
-              moment you subscribe, with the window as it already stands.
-              Nothing waits for the user to touch the chart first.
-            </p>
-          </div>
-          <div className="lp-annofact">
-            <h3>No debounce needed</h3>
-            <p>
-              Indices are integers, so a slow drag emits a handful of events
-              rather than one per frame. <code>spacing</code> is reported but
-              deliberately kept out of the change test — easing it would fire
-              sixty times a second.
-            </p>
-          </div>
-          <div className="lp-annofact">
-            <h3>Survives new history</h3>
-            <p>
-              Timestamps are part of the identity, so prepending an older page
-              re-emits even though <code>from</code> is still zero. A
-              pagination guard cannot get itself stuck.
-            </p>
-          </div>
-        </div>
-
-        <div className="lp-code lp-rangecode">
-          <div className="lp-codehead">Paginating on demand</div>
-          <pre>{`// with a feed attached the chart paginates on its own —
-// this is the manual path, for when you own the data
-chart.subscribe('visibleRange', async (r) => {
-  if (!r.settled || r.from > 50 || loading) return   // wait for the glide to stop
-
-  loading = true
-  const older = await api.candles({ to: r.fromTime, limit: 500 })
-  chart.setData(older.concat(chart.bars))
-  loading = false
-})`}</pre>
-        </div>
-      </section>
-
-      {/* ---- usage ---- */}
       <section className="lp-section" id="usage">
         <h2>Four lines to a live chart</h2>
         <p className="lp-lede">
@@ -1380,8 +1412,8 @@ class MyFeed extends DataFeed {
       <section className="lp-section" id="roadmap">
         <h2>Where it's going</h2>
         <p className="lp-lede">
-          v0.9.0 adds indicator panes on top of line series, fit-to-content,
-          time zones, replay, the annotation layer and the motion core. Honest about what isn't there yet — here's
+          Everything above is shipped and on npm. Here is what is honestly not
+          there yet, in the order it is coming. Honest about what isn't there yet — here's
           the order it's coming in.
         </p>
         <div className="lp-road">

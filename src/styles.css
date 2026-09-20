@@ -737,6 +737,25 @@ body.lock { overflow: hidden; }
   padding: 5px 11px;
 }
 
+/*
+ * Tag variants. .lp-tag is accent-on-accent unconditionally, so every section
+ * tag glowed as brightly as the hero pill — which is how "new in v0.4.0" read
+ * as the latest news. Exactly one section is accented now. Declared AFTER
+ * .lp-tag so equal specificity resolves this way.
+ */
+.lp-tag-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.lp-tag-new .lp-pulse { width: 5px; height: 5px; }
+
+.lp-tag-since {
+  color: var(--muted);
+  border-color: var(--border);
+  background: rgba(255,255,255,0.02);
+}
+
 .lp-annogrid {
   margin-top: 36px;
   display: grid;
