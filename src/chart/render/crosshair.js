@@ -9,7 +9,10 @@ export function drawCrosshair(ctx, s) {
 
   ctx.clearRect(0, 0, width, height)
   if (!cursor || !bars.length) return
-  if (cursor.x < 0 || cursor.x > plot.w || cursor.y < 0 || cursor.y > plot.h) return
+  // Bounds are the pane's rect, not the canvas: plot.y is 0 for a chart with
+  // a single pane and non-zero for every pane below the first.
+  if (cursor.x < plot.x || cursor.x > plot.x + plot.w) return
+  if (cursor.y < plot.y || cursor.y > plot.y + plot.h) return
 
   const i = Math.round(ts.index(cursor.x))
   const bar = bars[i]
@@ -37,10 +40,10 @@ export function drawCrosshair(ctx, s) {
   ctx.strokeStyle = theme.crosshair
   ctx.lineWidth = 1
   ctx.beginPath()
-  ctx.moveTo(Math.round(x) + 0.5, 0)
-  ctx.lineTo(Math.round(x) + 0.5, plot.h)
-  ctx.moveTo(0, Math.round(y) + 0.5)
-  ctx.lineTo(plot.w, Math.round(y) + 0.5)
+  ctx.moveTo(Math.round(x) + 0.5, plot.y)
+  ctx.lineTo(Math.round(x) + 0.5, plot.y + plot.h)
+  ctx.moveTo(plot.x, Math.round(y) + 0.5)
+  ctx.lineTo(plot.x + plot.w, Math.round(y) + 0.5)
   ctx.stroke()
   ctx.restore()
 

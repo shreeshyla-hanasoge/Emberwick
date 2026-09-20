@@ -442,4 +442,28 @@ export const MUTANTS = [
     find: '      if (tfMs >= 864e5) return date(ms)',
     replace: '',
   },
+  {
+    name: 'Price lines are culled against the canvas, not their pane',
+    file: 'src/chart/render/annotations.js',
+    find: '    if (y < plot.y || y > plot.y + plot.h) continue',
+    replace: '    if (y < 0 || y > plot.h) continue',
+  },
+  {
+    name: 'Time-band zones start at the top of the canvas',
+    file: 'src/chart/render/annotations.js',
+    find: '      y = plot.y\n      h = plot.h',
+    replace: '      y = 0\n      h = plot.h',
+  },
+  {
+    name: 'The crosshair responds outside its own pane',
+    file: 'src/chart/render/crosshair.js',
+    find: '  if (cursor.y < plot.y || cursor.y > plot.y + plot.h) return',
+    replace: '  if (cursor.y < 0 || cursor.y > plot.h) return',
+  },
+  {
+    name: 'The crosshair spans the whole canvas rather than its pane',
+    file: 'src/chart/render/crosshair.js',
+    find: '  ctx.moveTo(Math.round(x) + 0.5, plot.y)\n  ctx.lineTo(Math.round(x) + 0.5, plot.y + plot.h)',
+    replace: '  ctx.moveTo(Math.round(x) + 0.5, 0)\n  ctx.lineTo(Math.round(x) + 0.5, plot.h)',
+  },
 ]

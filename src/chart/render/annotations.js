@@ -53,13 +53,15 @@ export function drawZones(ctx, s) {
       const b = ts.x(nearestIndex(bars, Math.max(z.fromTime, z.toTime)))
       x = a
       w = Math.max(1, b - a)
-      y = 0
+      y = plot.y
       h = plot.h
     } else {
       continue
     }
 
-    if (x > plot.w || x + w < 0 || y > plot.h || y + h < 0) continue
+    // plot.y rather than 0: the band belongs to its own pane's rect, not to
+    // the top of the canvas.
+    if (x > plot.w || x + w < 0 || y > plot.y + plot.h || y + h < plot.y) continue
 
     ctx.fillStyle = z.color || 'rgba(38,166,154,0.10)'
     ctx.fillRect(x, y, w, h)
@@ -99,7 +101,7 @@ export function drawPriceLines(ctx, s) {
     const price = toNumber(L.price)
     if (Number.isNaN(price)) continue
     const y = Math.round(ps.y(price)) + 0.5
-    if (y < 0 || y > plot.h) continue
+    if (y < plot.y || y > plot.y + plot.h) continue
 
     const color = L.color || theme.textStrong
 
@@ -110,8 +112,8 @@ export function drawPriceLines(ctx, s) {
       ctx.strokeStyle = color
       ctx.lineWidth = L.lineWidth || 1
       ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(plot.w, y)
+      ctx.moveTo(plot.x, y)
+      ctx.lineTo(plot.x + plot.w, y)
       ctx.stroke()
       ctx.setLineDash([])
     }
