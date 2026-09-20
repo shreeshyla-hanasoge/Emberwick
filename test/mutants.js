@@ -283,8 +283,9 @@ export const MUTANTS = [
   {
     name: 'The price axis is drawn before the scale is primed',
     file: 'src/chart/render/grid.js',
-    find: '  if (ps.primed) {',
-    replace: '  if (true) {',
+    // Re-anchored when drawPriceAxis was extracted for sub-panes.
+    find: '  if (!ps.primed) return',
+    replace: '  if (false) return',
   },
   {
     name: 'lineVisible: false is ignored',
@@ -337,14 +338,16 @@ export const MUTANTS = [
   {
     name: 'Series values no longer influence autoscale',
     file: 'src/chart/core/Chart.js',
-    find: '        if (isFinite(ext.min)) this.ps.consider(ext.min, ext.max)',
+    // Re-anchored when fitting moved per pane.
+    find: '          if (isFinite(ext.min)) pane.ps.consider(ext.min, ext.max)',
     replace: '',
   },
   {
     name: 'Hidden series still influence autoscale',
     file: 'src/chart/core/Chart.js',
-    find: '      if (entry.opts.visible) visibleSeries.push(entry)',
-    replace: '      visibleSeries.push(entry)',
+    // Re-anchored when series began routing to panes.
+    find: '      if (!entry.opts.visible) continue',
+    replace: '      if (false) continue',
   },
   {
     name: 'Series indices are never re-resolved',
@@ -465,5 +468,77 @@ export const MUTANTS = [
     file: 'src/chart/render/crosshair.js',
     find: '  ctx.moveTo(Math.round(x) + 0.5, plot.y)\n  ctx.lineTo(Math.round(x) + 0.5, plot.y + plot.h)',
     replace: '  ctx.moveTo(Math.round(x) + 0.5, 0)\n  ctx.lineTo(Math.round(x) + 0.5, plot.h)',
+  },
+  {
+    name: 'A sub-pane is fitted to the bars as well as its series',
+    file: 'src/chart/core/Chart.js',
+    find: '        if (pane === this._panes[0]) pane.ps.considerBars(this.bars, from, to, liveVisible)',
+    replace: '        pane.ps.considerBars(this.bars, from, to, liveVisible)',
+  },
+  {
+    name: 'Only the price pane is fitted at all',
+    file: 'src/chart/core/Chart.js',
+    find: '      for (const pane of this._panes) {\n        pane.ps.beginFit()',
+    replace: '      for (const pane of [this._panes[0]]) {\n        pane.ps.beginFit()',
+  },
+  {
+    name: 'Pane ticking short-circuits once one pane is animating',
+    file: 'src/chart/core/Chart.js',
+    find: '    for (const pane of this._panes) {\n      if (pane.ps.tick(dt)) animating = true\n    }',
+    replace: '    for (const pane of this._panes) {\n      animating = animating || pane.ps.tick(dt)\n    }',
+  },
+  {
+    name: 'Series ignore their pane and all land on the price pane',
+    file: 'src/chart/core/Chart.js',
+    find: '      const pane = this._paneById.get(entry.opts.pane) || this._panes[0]',
+    replace: '      const pane = this._panes[0]',
+  },
+  {
+    name: 'setSeries silently accepts an unknown pane',
+    file: 'src/chart/core/Chart.js',
+    find: '    if (options.pane != null && !this._paneById.has(String(options.pane))) {',
+    replace: '    if (false) {',
+  },
+  {
+    name: 'Sub-pane series are never drawn',
+    file: 'src/chart/core/Chart.js',
+    find: '      for (let i = 1; i < this._panes.length; i++) {\n        drawSeries(this.layers.ctx.main, this._paneState(state, this._panes[i]))\n      }',
+    replace: '',
+  },
+  {
+    name: 'Sub-panes get no price axis',
+    file: 'src/chart/core/Chart.js',
+    find: '        drawPriceAxis(this.layers.ctx.base, this._paneState(state, this._panes[i]))',
+    replace: '',
+  },
+  {
+    name: 'The pane state keeps the price pane rect',
+    file: 'src/chart/core/Chart.js',
+    find: '    return { ...base, ps: pane.ps, plot: pane.rect, series: pane.visible }',
+    replace: '    return { ...base, ps: pane.ps, series: pane.visible }',
+  },
+  {
+    name: 'Pane heights do not absorb rounding',
+    file: 'src/chart/core/Panes.js',
+    find: '      ? available - used',
+    replace: '      ? Math.round(floors[i] + (slack * p.weight) / weightSum)',
+  },
+  {
+    name: 'paneAtY returns the first pane for any y',
+    file: 'src/chart/core/Panes.js',
+    find: '    if (y >= p.rect.y && y <= p.rect.y + p.rect.h) return p',
+    replace: '    return p',
+  },
+  {
+    name: 'removePane leaves its series orphaned',
+    file: 'src/chart/core/Chart.js',
+    find: '      if (entry.opts.pane === key) this._series.delete(sid)',
+    replace: '',
+  },
+  {
+    name: 'The price pane can be removed',
+    file: 'src/chart/core/Chart.js',
+    find: "    if (key === PRICE_PANE) throw new Error('Chart: the price pane cannot be removed')",
+    replace: '',
   },
 ]

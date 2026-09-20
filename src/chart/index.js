@@ -26,5 +26,5 @@ export function createChart(container, options) {
   return new Chart(container, options)
 }
 
-export const version = '0.8.0'
+export const version = '0.9.0'
 

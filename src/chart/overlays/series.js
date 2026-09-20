@@ -30,6 +30,8 @@ export function normalizeSeries(raw, id) {
     visible: o.visible !== false,
     /** Passthrough metadata — handed back by getSeries(), never drawn. */
     title: o.title != null ? String(o.title) : '',
+    /** Which pane draws this. Defaults to the price pane. */
+    pane: o.pane != null ? String(o.pane) : 'price',
   }
 }
 

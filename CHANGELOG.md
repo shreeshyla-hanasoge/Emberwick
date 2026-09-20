@@ -3,6 +3,68 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-09-20
+
+**Panes.** An oscillator can have a scale of its own.
+
+### Added
+
+- **`chart.addPane(id, options)`** and the pane API. A pane is a horizontal
+  band with its own price scale, sharing the time axis with every other pane.
+
+  ```js
+  chart.addPane('rsi', { weight: 1 })
+  chart.setSeries('rsi14', { data: points, pane: 'rsi' })
+  ```
+
+  `addPane`, `removePane`, `panes()`, `pane(id)`, `paneScale(id)`,
+  `paneRect(id)`; options `weight`, `minHeight`, `priceScale`, `title`; and a
+  `paneGap` chart option. `'price'` is the pane candles, volume, markers,
+  price lines and zones draw on — it is always the top band and cannot be
+  removed.
+
+  This is what an oscillator needs. RSI lives on 0–100; on an instrument
+  trading near 24,000 a shared scale flattens the candles into a line.
+
+- **`pane` on a series.** Defaults to `'price'`. **An unknown pane id throws**
+  rather than falling back: defaulting would put an RSI at 50 through a 24,000
+  autoscale and flatten the candles, which is precisely the failure panes
+  exist to prevent, arriving with no error at all.
+
+- `drawPriceAxis` is extracted from `drawGrid`, so a sub-pane draws its own
+  horizontal grid and labels. Sub-panes never clear a canvas — exactly one
+  renderer clears each layer — which is what makes multi-pane drawing an
+  append to the existing draw block rather than a restructure of it.
+
+### Changed
+
+- **`chart.ps` and `chart.plot` are now getters onto the price pane.** Both
+  still work. `paneScale('price')` and `paneRect('price')` supersede them and
+  say which pane they mean. One improvement falls out: `chart.plot` is a live
+  rect mutated in place rather than replaced on every layout, so a reference
+  held across a resize stays correct.
+- A sub-pane is scaled by its own series alone — it never sees the bars.
+- The crosshair belongs to the pane under the pointer, so its price tag reads
+  that pane's scale.
+
+### Fixed
+
+- **The time axis is anchored below the last pane.** It was drawn at
+  `plot.h`, which stopped meaning "the bottom of the plot" the moment a second
+  pane existed — the labels and the separator appeared *between* the panes.
+  Caught by looking at the rendered page, not by a test.
+- A duplicate `export type LineStyle` in the typings, introduced by the 0.7.0
+  series work. Duplicate identifier is a hard TypeScript error, so anyone
+  type-checking against 0.7.0 or 0.8.0 failed to compile; the runtime was
+  unaffected.
+
+### Notes
+
+- Panes are not resizable or reorderable. Heights come from `weight`.
+- Landing page: a Panes section that makes the argument by letting you break
+  it — one click moves the RSI onto the price scale.
+- 18 tests and 12 mutants. 138 tests, 86/86 mutants caught.
+
 ## [0.8.0] — 2026-09-20
 
 What a finished dataset needs that a live chart does not: the whole run in

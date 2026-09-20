@@ -7,7 +7,7 @@ import { defaultTheme } from './palette.js'
 import { LiveCandle } from '../motion/LiveCandle.js'
 import { Inertia } from '../motion/Inertia.js'
 import { Replay } from '../replay/Replay.js'
-import { drawGrid } from '../render/grid.js'
+import { drawGrid, drawPriceAxis } from '../render/grid.js'
 import { drawCandles } from '../render/candles.js'
 import { drawCrosshair } from '../render/crosshair.js'
 import { drawZones, drawPriceLines, drawMarkers } from '../render/annotations.js'
@@ -39,6 +39,23 @@ const inactiveReplay = () => ({
  * touches nothing but DOM and Canvas, which is what lets the same core ship
  * as a React component, a Web Component, or a plain script tag.
  */
+/** The pane candles, volume and annotations always draw on. */
+const PRICE_PANE = 'price'
+
+/** The public shape of a pane. `rect` and `ps` are live; the rest is a copy. */
+function paneInfo(pane, seriesIds) {
+  return {
+    id: pane.id,
+    weight: pane.weight,
+    minHeight: pane.minHeight,
+    title: pane.title,
+    rect: pane.rect,
+    ps: pane.ps,
+    primed: pane.ps.primed,
+    series: seriesIds,
+  }
+}
+
 /** Consecutive gaps sampled when inferring the timeframe. */
 const TF_SAMPLES = 200
 
@@ -452,6 +469,15 @@ export class Chart {
    * Feed failures are delivered as an 'error' event so an adapter can react.
    * With no subscriber they still reach the console rather than vanishing.
    */
+  /**
+   * The frame state as `pane` sees it: its own scale, its own rect, its own
+   * series. Everything else — theme, time scale, bars, formatter — is shared,
+   * which is what makes the time axis common to every pane.
+   */
+  _paneState(base, pane) {
+    return { ...base, ps: pane.ps, plot: pane.rect, series: pane.visible }
+  }
+
   _emitError(err, phase) {
     const set = this._listeners.error
     if (!set.size) {
@@ -822,6 +848,74 @@ export class Chart {
     this._emitState('replay', this.replayState(), this._replayIdentity)
   }
 
+  // ----------------------------------------------------------------- panes --
+  /**
+   * Add a pane below the existing ones.
+   *
+   * A pane is a horizontal band with its own price scale, sharing the time
+   * axis. Route a series to it with setSeries(id, { pane }). This is what an
+   * oscillator needs: RSI on 0..100 cannot share a scale with a price near
+   * 24,000 without flattening the candles into a line.
+   *
+   *   chart.addPane('rsi', { weight: 1 })
+   *   chart.setSeries('rsi14', { data: points, pane: 'rsi' })
+   */
+  addPane(id, options = {}) {
+    if (id == null) throw new Error('Chart: addPane() needs an id')
+    const key = String(id)
+    if (this._paneById.has(key)) throw new Error(`Chart: pane "${key}" already exists`)
+    const pane = new Pane(key, options, { priceScale: this.options.priceScale })
+    this._panes.push(pane)
+    this._paneById.set(key, pane)
+    this._layout()
+    this.loop.invalidate('all')
+    return paneInfo(pane, this._seriesIdsFor(key))
+  }
+
+  /** Remove a pane and every series routed to it. The price pane cannot go. */
+  removePane(id) {
+    const key = String(id)
+    if (key === PRICE_PANE) throw new Error('Chart: the price pane cannot be removed')
+    const pane = this._paneById.get(key)
+    if (!pane) return this
+    for (const [sid, entry] of this._series) {
+      if (entry.opts.pane === key) this._series.delete(sid)
+    }
+    this._panes.splice(this._panes.indexOf(pane), 1)
+    this._paneById.delete(key)
+    this._layout()
+    this.loop.invalidate('all')
+    return this
+  }
+
+  /** Every pane, top to bottom. panes()[0] is always the price pane. */
+  panes() {
+    return this._panes.map((p) => paneInfo(p, this._seriesIdsFor(p.id)))
+  }
+
+  pane(id) {
+    const p = this._paneById.get(String(id))
+    return p ? paneInfo(p, this._seriesIdsFor(p.id)) : null
+  }
+
+  /** A pane's live PriceScale — for positioning host overlays. */
+  paneScale(id) {
+    const p = this._paneById.get(String(id))
+    return p ? p.ps : null
+  }
+
+  /** A copy of a pane's rect, in CSS px. */
+  paneRect(id) {
+    const p = this._paneById.get(String(id))
+    return p ? { ...p.rect } : null
+  }
+
+  _seriesIdsFor(paneId) {
+    const out = []
+    for (const [sid, entry] of this._series) if (entry.opts.pane === paneId) out.push(sid)
+    return out
+  }
+
   // ---------------------------------------------------------------- series --
   /**
    * Create or update a series.
@@ -840,6 +934,16 @@ export class Chart {
   setSeries(id, options = {}) {
     if (id == null) throw new Error('Chart: setSeries() needs an id')
     const key = String(id)
+    // Refuse rather than defaulting to the price pane. A typo'd pane id would
+    // otherwise put an RSI at 50 through the price scale's autoscale on a
+    // 24,000 instrument, flattening the candles into a line — exactly the
+    // failure panes exist to prevent, arriving with no error at all.
+    if (options.pane != null && !this._paneById.has(String(options.pane))) {
+      throw new Error(
+        `Chart: setSeries("${key}") names pane "${options.pane}", which does not exist — ` +
+          `call chart.addPane(${JSON.stringify(String(options.pane))}) first`,
+      )
+    }
     const existing = this._series.get(key)
     const opts = normalizeSeries(options, key)
     if (existing) {
@@ -972,7 +1076,7 @@ export class Chart {
     // whenever a series' own data is replaced — which is why they cannot
     // share _resolveKey.
     const barKey = this._barGen + ':' + this.bars.length
-    const visibleSeries = []
+    for (const pane of this._panes) pane.visible.length = 0
     for (const entry of this._series.values()) {
       // New data clears resolveKey outright, so this covers both causes:
       // the bar array shifting, and the series' own points being replaced.
@@ -981,21 +1085,34 @@ export class Chart {
         entry.drawable = resolveSeriesPoints(entry.points, this.bars, this.ts.timeframeMs)
         entry.resolveKey = key
       }
-      if (entry.opts.visible) visibleSeries.push(entry)
+      if (!entry.opts.visible) continue
+      // setSeries refuses an unknown pane, so this only falls back if a pane
+      // was removed out from under a series that outlived it.
+      const pane = this._paneById.get(entry.opts.pane) || this._panes[0]
+      pane.visible.push(entry)
     }
+    const visibleSeries = this._panes[0].visible
 
     // Autoscale over the bars AND every visible series: a value outside the
     // candle range would otherwise be drawn and then clipped at the edge.
     if (this.bars.length) {
-      this.ps.beginFit()
-      this.ps.considerBars(this.bars, from, to, liveVisible)
-      for (const entry of visibleSeries) {
-        const ext = seriesExtent(entry.drawable, from, to)
-        if (isFinite(ext.min)) this.ps.consider(ext.min, ext.max)
+      for (const pane of this._panes) {
+        pane.ps.beginFit()
+        // Only the price pane is fitted to the bars. A sub-pane is scaled by
+        // its own series alone — an RSI on 0..100 must not see a price.
+        if (pane === this._panes[0]) pane.ps.considerBars(this.bars, from, to, liveVisible)
+        for (const entry of pane.visible) {
+          const ext = seriesExtent(entry.drawable, from, to)
+          if (isFinite(ext.min)) pane.ps.consider(ext.min, ext.max)
+        }
+        pane.ps.endFit()
       }
-      this.ps.endFit()
     }
-    if (this.ps.tick(dt)) animating = true
+    // Every pane ticks, every frame. `animating || pane.ps.tick(dt)` would
+    // short-circuit once one pane reported motion and freeze the rest.
+    for (const pane of this._panes) {
+      if (pane.ps.tick(dt)) animating = true
+    }
 
     const redrawAll = animating || dirty.has('all') || dirty.has('base') || dirty.has('main')
     const state = {
@@ -1014,6 +1131,8 @@ export class Chart {
       zones: this.zones,
       series: visibleSeries,
       fmt: this.fmt,
+      /** Bottom of the LAST pane — where the shared time axis belongs. */
+      plotBottom: this._panes[this._panes.length - 1].rect.y + this._panes[this._panes.length - 1].rect.h,
     }
 
     // Markers past the replay cursor are future information — hidden, not
@@ -1038,9 +1157,19 @@ export class Chart {
 
     if (redrawAll) {
       drawGrid(this.layers.ctx.base, state)
+      // Sub-panes draw their own horizontal grid and price labels. drawGrid
+      // has already cleared and painted the background for the whole canvas —
+      // exactly one renderer clears each layer, which is what lets this be an
+      // append rather than a restructure.
+      for (let i = 1; i < this._panes.length; i++) {
+        drawPriceAxis(this.layers.ctx.base, this._paneState(state, this._panes[i]))
+      }
       drawZones(this.layers.ctx.base, state)
       drawCandles(this.layers.ctx.main, state)
       drawSeries(this.layers.ctx.main, state)
+      for (let i = 1; i < this._panes.length; i++) {
+        drawSeries(this.layers.ctx.main, this._paneState(state, this._panes[i]))
+      }
       drawPriceLines(this.layers.ctx.main, state)
       this._markerHits = drawMarkers(
         this.layers.ctx.main,
@@ -1050,7 +1179,13 @@ export class Chart {
       )
     }
     if (redrawAll || dirty.has('overlay')) {
-      drawCrosshair(this.layers.ctx.overlay, state)
+      // The crosshair belongs to whichever pane the pointer is in, so its
+      // price tag reads that pane's scale rather than the price pane's.
+      const hot = this.cursor ? paneAtY(this._panes, this.cursor.y) : null
+      drawCrosshair(
+        this.layers.ctx.overlay,
+        hot && hot !== this._panes[0] ? this._paneState(state, hot) : state,
+      )
     }
 
     // Emitted after drawing, deliberately: a handler is free to call
@@ -1176,6 +1311,8 @@ export class Chart {
     for (const keys of Object.values(this._stateKeys)) keys.clear()
     if (this._replay) this._replay.detach()
     this._replay = null
+    this._panes.length = 1
+    this._paneById = new Map([[PRICE_PANE, this._panes[0]]])
     this._series.clear()
     this._markers = []
     this._markerHits = []

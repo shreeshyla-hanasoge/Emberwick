@@ -481,6 +481,128 @@ function ViewChart() {
   )
 }
 
+/* ---------------------------------------------------------------- panes -- */
+/**
+ * The argument for panes, made by letting you break it.
+ *
+ * RSI lives on 0..100. The instrument here trades near 24,000. Put both on one
+ * scale and the candles collapse into a flat line at the top while the
+ * oscillator hugs the bottom — which is the whole reason a second scale has to
+ * exist. The toggle moves the same series between its own pane and the price
+ * pane, so the failure is one click away rather than a paragraph.
+ */
+function rsiSeries(bars, period = 14) {
+  let avgGain = 0
+  let avgLoss = 0
+  return bars.map((b, i) => {
+    if (i === 0) return { time: b.time } // no change yet — a gap
+    const diff = b.close - bars[i - 1].close
+    const gain = Math.max(0, diff)
+    const loss = Math.max(0, -diff)
+    if (i <= period) {
+      avgGain += gain / period
+      avgLoss += loss / period
+      if (i < period) return { time: b.time } // warm-up
+    } else {
+      avgGain = (avgGain * (period - 1) + gain) / period
+      avgLoss = (avgLoss * (period - 1) + loss) / period
+    }
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss
+    return { time: b.time, value: Number((100 - 100 / (1 + rs)).toFixed(2)) }
+  })
+}
+
+function PanesChart() {
+  const hostRef = useRef(null)
+  const chartRef = useRef(null)
+  const dataRef = useRef(null)
+  const [ready, setReady] = useState(false)
+  const [split, setSplit] = useState(true)
+
+  useEffect(() => {
+    let disposed = false
+    const chart = createChart(hostRef.current, {
+      theme: { ...defaultTheme, background: '#0a0d15' },
+      timeScale: { spacing: 7, rightOffset: 4 },
+      priceScale: { marginTop: 0.16, marginBottom: 0.14 },
+    })
+    chartRef.current = chart
+
+    const feed = new RandomFeed({
+      symbol: 'NIFTY',
+      timeframe: 60000,
+      seed: 20260921,
+      start: 24180,
+      volatility: 0.0011,
+    })
+
+    feed
+      .getBars({ symbol: 'NIFTY', timeframe: 60000, to: null, limit: 260 })
+      .then((bars) => {
+        if (disposed || !bars.length) return
+        dataRef.current = rsiSeries(bars)
+        chart.setData(bars)
+        chart.addPane('rsi', { weight: 1, title: 'RSI 14' })
+        chart.setSeries('rsi14', { data: dataRef.current, pane: 'rsi', color: '#c084fc', lineWidth: 1.6 })
+        chart.fitContent()
+        setReady(true)
+      })
+
+    return () => {
+      disposed = true
+      feed.destroy()
+      chart.destroy()
+      chartRef.current = null
+    }
+  }, [])
+
+  const place = (own) => {
+    const chart = chartRef.current
+    if (!chart || !dataRef.current) return
+    setSplit(own)
+    chart.removeSeries('rsi14')
+    if (own) {
+      if (!chart.pane('rsi')) chart.addPane('rsi', { weight: 1, title: 'RSI 14' })
+    } else if (chart.pane('rsi')) {
+      chart.removePane('rsi')
+    }
+    chart.setSeries('rsi14', {
+      data: dataRef.current,
+      pane: own ? 'rsi' : 'price',
+      color: '#c084fc',
+      lineWidth: 1.6,
+    })
+  }
+
+  return (
+    <div className="lp-annochart">
+      <div className="lp-chartwrap">
+        <div className="lp-chartbar">
+          <span className="lp-dot lp-dot-a" />
+          <span className="lp-dot lp-dot-b" />
+          <span className="lp-dot lp-dot-c" />
+          <span className="lp-chartbar-title">NIFTY · 1m · RSI 14</span>
+        </div>
+        <div className="lp-chart lp-chart-sm" ref={hostRef}>
+          {!ready && <div className="lp-chart-loading">computing RSI…</div>}
+        </div>
+      </div>
+
+      <div className="lp-serieslegend">
+        <button type="button" className={`lp-serieschip ${split ? 'is-on' : ''}`} onClick={() => place(true)}>
+          its own pane
+        </button>
+        <button type="button" className={`lp-serieschip ${split ? '' : 'is-on'}`} onClick={() => place(false)}>
+          on the price scale
+        </button>
+        <span className="lp-serieshint">
+          {split ? 'one scale each' : 'RSI 0–100 against a price near 24,000'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 /* ---------------------------------------------------------------- replay -- */
 /**
  * The scrubber demoing itself. A fixed 420-bar dataset is replayed from its
@@ -840,6 +962,7 @@ export default function Landing() {
           <a href="#features">Features</a>
           <a href="#replay">Replay</a>
           <a href="#series">Series</a>
+          <a href="#panes">Panes</a>
           <a href="#view">Sessions</a>
           <a href="#annotations">Annotations</a>
           <a href="#range">Range events</a>
@@ -853,7 +976,7 @@ export default function Landing() {
       {/* ---- hero ---- */}
       <section className="lp-hero">
         <span className="lp-pill">
-          <span className="lp-pulse" /> new in v0.8.0 — fit to content, time zones
+          <span className="lp-pulse" /> new in v0.9.0 — indicator panes
         </span>
         <h1>
           Candlestick charts that
@@ -1067,6 +1190,37 @@ chart.setSeries('rsi', { data: [
         </div>
       </section>
 
+      <section className="lp-section" id="panes">
+        <span className="lp-tag">new in v0.9.0</span>
+        <h2>A scale of its own</h2>
+        <p className="lp-lede">
+          RSI lives on 0–100. This instrument trades near 24,000. On one scale
+          the candles flatten into a line and the oscillator hugs the floor — so
+          a pane is a band of the plot with its own price scale, sharing the
+          time axis. Toggle it onto the price scale and watch it break.
+        </p>
+
+        <div className="lp-annogrid">
+          <PanesChart />
+
+          <div className="lp-code lp-annocode">
+            <div className="lp-codehead">Adding a pane</div>
+            <pre>{`chart.addPane('rsi', { weight: 1 })
+
+chart.setSeries('rsi14', {
+  data: points,
+  pane: 'rsi',
+  color: '#c084fc',
+})
+
+// an unknown pane throws rather than quietly
+// putting RSI-at-50 on a 24,000 scale
+chart.paneScale('rsi').y(70)   // where 70 sits
+chart.paneRect('rsi')          // { x, y, w, h }`}</pre>
+          </div>
+        </div>
+      </section>
+
       <section className="lp-section" id="view">
         <span className="lp-tag">new in v0.8.0</span>
         <h2>Whose clock is it?</h2>
@@ -1226,8 +1380,8 @@ class MyFeed extends DataFeed {
       <section className="lp-section" id="roadmap">
         <h2>Where it's going</h2>
         <p className="lp-lede">
-          v0.8.0 adds fit-to-content and time-zone aware labels on top of line
-          series, replay, the annotation layer, range events and the motion core. Honest about what isn't there yet — here's
+          v0.9.0 adds indicator panes on top of line series, fit-to-content,
+          time zones, replay, the annotation layer and the motion core. Honest about what isn't there yet — here's
           the order it's coming in.
         </p>
         <div className="lp-road">

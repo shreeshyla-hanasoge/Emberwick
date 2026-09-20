@@ -108,6 +108,38 @@ export interface SeriesPoint {
   value?: number | string | null
 }
 
+export interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface PaneOptions {
+  /** Flex share of the plot height. Default 1; the price pane is 3. */
+  weight?: number
+  /** Floor on this pane's height in CSS px. Default 40. */
+  minHeight?: number
+  /** This pane's scale. Defaults to the chart's `priceScale` option. */
+  priceScale?: PriceScaleOptions
+  /** Passthrough caption. Not drawn. */
+  title?: string
+}
+
+export interface PaneInfo {
+  id: string
+  weight: number
+  minHeight: number
+  title: string
+  /** Live rect in CSS px, mutated in place on resize. */
+  readonly rect: Rect
+  readonly ps: PriceScale
+  /** False until this pane's scale has fitted a value — it draws no axis. */
+  readonly primed: boolean
+  /** Ids of the series drawn here, in draw order. */
+  readonly series: string[]
+}
+
 export interface SeriesOptions {
   /** Points. Omit to leave the existing data untouched. */
   data?: SeriesPoint[]
@@ -123,6 +155,11 @@ export interface SeriesOptions {
   visible?: boolean
   /** Passthrough metadata, handed back by getSeries(). Never drawn. */
   title?: string
+  /**
+   * Which pane draws this series. Defaults to 'price'.
+   * Throws if the pane does not exist — call addPane() first.
+   */
+  pane?: string
 }
 
 /** A series' resolved options, as returned by getSeries(). */
@@ -199,6 +236,8 @@ export interface PriceScaleOptions {
 }
 
 export interface ChartOptions {
+  /** Vertical gap between panes in CSS px. Default 6. */
+  paneGap?: number
   /**
    * IANA time zone for every rendered timestamp, e.g. 'Asia/Kolkata'.
    * Defaults to the browser's local zone. Display only.
@@ -440,6 +479,22 @@ export declare class Chart {
    * Calling it again with the same id updates in place. Insertion order is
    * draw order. Throws if `id` is null or undefined.
    */
+  /**
+   * Add a pane below the existing ones — a horizontal band with its own price
+   * scale, sharing the time axis. What an oscillator needs: RSI on 0..100
+   * cannot share a scale with a price near 24,000.
+   */
+  addPane(id: string, options?: PaneOptions): PaneInfo
+  /** Remove a pane and every series routed to it. The price pane cannot go. */
+  removePane(id: string): this
+  /** Every pane, top to bottom. panes()[0] is always the price pane. */
+  panes(): PaneInfo[]
+  pane(id: string): PaneInfo | null
+  /** A pane's live PriceScale. Supersedes `chart.ps`. */
+  paneScale(id: string): PriceScale | null
+  /** A copy of a pane's rect in CSS px. Supersedes `chart.plot`. */
+  paneRect(id: string): Rect | null
+
   setSeries(id: string, options?: SeriesOptions): this
   /** Replace one series' points, leaving its presentation options alone. */
   setSeriesData(id: string, points: SeriesPoint[]): this

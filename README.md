@@ -487,6 +487,7 @@ price lines and markers.
 | Option | Default | Notes |
 |---|---|---|
 | `data` | — | `{ time, value }[]`. `time` is ms epoch, resolved to the nearest bar |
+| `pane` | `'price'` | Which pane draws it. Throws if that pane does not exist |
 | `color` | `theme.textStrong` | |
 | `lineWidth` | `1.5` | |
 | `lineStyle` | `'solid'` | `'solid'`, `'dashed'`, `'dotted'` |
@@ -523,6 +524,61 @@ Series share the price axis with the candles. An equity curve at 200,000
 against a price around 100 will technically render, but the candles will be a
 flat line — a second pane with its own scale is the answer, and it does not
 exist yet.
+
+---
+
+## Panes
+
+An oscillator cannot share a scale with a price. RSI lives on 0–100 and MACD
+around zero; put either on a chart of an instrument trading at 24,000 and the
+candles collapse into a flat line.
+
+A **pane** is a horizontal band with its own price scale, sharing the time
+axis with every other pane.
+
+```js
+chart.addPane('rsi', { weight: 1 })
+chart.setSeries('rsi14', { data: points, pane: 'rsi', color: '#c084fc' })
+```
+
+| Method | Description |
+|---|---|
+| `addPane(id, options)` | Add a band below the existing ones. Returns its `PaneInfo` |
+| `removePane(id)` | Remove it, and every series routed to it |
+| `panes()` | Every pane, top to bottom. `panes()[0]` is always the price pane |
+| `pane(id)` | One pane, or `null` |
+| `paneScale(id)` | That pane's live `PriceScale` |
+| `paneRect(id)` | A copy of its rect, in CSS px |
+
+| Option | Default | Notes |
+|---|---|---|
+| `weight` | `1` | Flex share of the plot height. The price pane is `3` |
+| `minHeight` | `40` | Floor in CSS px |
+| `priceScale` | chart's | This pane's scale options |
+| `title` | — | Passthrough metadata. Not drawn |
+
+`'price'` is the pane candles, volume, markers, price lines and zones always
+draw on. It cannot be removed, and it is always the top band.
+
+**An unknown pane id throws.** Defaulting to the price pane would put an RSI at
+50 through a 24,000 scale and flatten the candles — exactly the failure panes
+exist to prevent, arriving with no error at all.
+
+A pane whose series are all hidden, or which has none, draws no axis rather
+than inventing one — the same rule the price pane follows with no bars.
+
+### Migrating from `chart.ps` and `chart.plot`
+
+Both still work and still address the price pane. `paneScale('price')` and
+`paneRect('price')` are the replacements, and they say which pane they mean:
+
+```js
+const y = chart.paneScale('rsi').y(70)     // where 70 sits in the RSI pane
+const band = chart.paneRect('rsi')         // { x, y, w, h }
+```
+
+One difference worth knowing: `chart.plot` is a live rect mutated in place, so
+a reference held across a resize stays correct. `paneRect()` returns a copy.
 
 ---
 
@@ -981,10 +1037,11 @@ Honest list of what isn't there yet:
   the hovered bar; rendering the readout is still yours to do.
 - **Markers are not draggable.** They are hit-tested for hover and click, but
   there is no drag-to-move or editing interaction.
-- **No indicator maths, and no second pane.** Emberwick draws the line you
-  hand it — see [Series](#series) — but computing SMA/EMA/RSI/MACD is yours,
-  and an oscillator with its own scale has nowhere to live yet. Drawing tools
-  (trendlines, Fib) are not implemented.
+- **No indicator maths.** Emberwick draws the line you hand it — see
+  [Series](#series) and [Panes](#panes) — but computing SMA/EMA/RSI/MACD is
+  yours. Drawing tools (trendlines, Fib) are not implemented.
+- **Panes are not resizable or reorderable.** Heights come from `weight` and
+  are fixed at layout; there is no drag handle between bands.
 - **Candlesticks only, as a price type.** No Heikin-Ashi, and no area or
   baseline fills — a series is a stroked line.
 - **No session awareness.** The time axis is indexed by bar, not by clock, so
