@@ -261,11 +261,17 @@ export interface ChartOptions {
   priceScale?: PriceScaleOptions
 }
 
-/** Payload of the 'crosshair' event. `null` when the cursor leaves the plot. */
+/**
+ * Payload of the 'crosshair' event. `null` when the pointer is on no pane —
+ * off the plot, on the time axis, or in the seam between two panes.
+ */
 export interface CrosshairPayload {
   index: number
   bar: Bar
+  /** In the scale of `pane`, which is why the two travel together. */
   price: number
+  /** Id of the pane under the pointer. */
+  pane: string
 }
 
 /** Payload of the 'visibleRange' event, and the return of chart.visibleRange(). */
@@ -288,6 +294,16 @@ export interface VisibleRangePayload {
    * (a fetch, a re-aggregation) until you see it.
    */
   settled: boolean
+}
+
+/**
+ * Accepted by `chart.setVisibleRange()`. Inclusive bar indices, so a
+ * VisibleRangePayload goes straight back in — though not as an identity,
+ * since that payload also reports the partly visible bar at each edge.
+ */
+export interface VisibleRangeInput {
+  from: number
+  to: number
 }
 
 /* ------------------------------------------------------------------ feed -- */
@@ -366,6 +382,13 @@ export declare class TimeScale {
   panBy(dx: number): void
   zoomAt(x: number, factor: number): void
   snapToRealtime(): void
+  /** Fit `barCount` bars, the last at the right edge. Not animated. */
+  fitContent(barCount: number): boolean
+  /**
+   * Bars `from`..`to` across the plot, `to` at the right edge. Ends clamp.
+   * Chart#setVisibleRange is the entry point that also repaints.
+   */
+  setVisibleRange(from: number, to: number): boolean
 }
 
 export declare class PriceScale {
@@ -373,9 +396,22 @@ export declare class PriceScale {
   y(price: number): number
   price(y: number): number
   setMode(mode: PriceMode): void
+  /**
+   * Stretch about the midpoint — what dragging a pane's price axis does.
+   * Clears autoscale on this pane; `resetAuto()` restores it.
+   */
+  scaleBy(factor: number): void
+  /**
+   * Translate the range by a pixel delta, positive `dy` carrying the content
+   * down with the pointer — what dragging the plot vertically does. Clears
+   * autoscale, which resetAuto() restores.
+   */
+  panBy(dy: number): void
   resetAuto(): void
   readonly lo: number
   readonly hi: number
+  /** False until something has been fitted; an unprimed axis is not drawn. */
+  readonly primed: boolean
 }
 
 /* ---------------------------------------------------------------- replay -- */
@@ -473,12 +509,6 @@ export declare class Chart {
   setFeed(feed: Feed): Promise<void>
   detachFeed(): void
 
-  /** Replace every marker. */
-  /**
-   * Create or update a series — an arbitrary y-value over the bar time axis.
-   * Calling it again with the same id updates in place. Insertion order is
-   * draw order. Throws if `id` is null or undefined.
-   */
   /**
    * Add a pane below the existing ones — a horizontal band with its own price
    * scale, sharing the time axis. What an oscillator needs: RSI on 0..100
@@ -495,6 +525,11 @@ export declare class Chart {
   /** A copy of a pane's rect in CSS px. Supersedes `chart.plot`. */
   paneRect(id: string): Rect | null
 
+  /**
+   * Create or update a series — an arbitrary y-value over the bar time axis.
+   * Calling it again with the same id updates in place. Insertion order is
+   * draw order. Throws if `id` is null or undefined.
+   */
   setSeries(id: string, options?: SeriesOptions): this
   /** Replace one series' points, leaving its presentation options alone. */
   setSeriesData(id: string, points: SeriesPoint[]): this
@@ -505,6 +540,7 @@ export declare class Chart {
   /** Every series' options, in draw order. Point data is not included. */
   getSeries(): SeriesInfo[]
 
+  /** Replace every marker. */
   setMarkers(markers: Marker[]): void
   /** Current markers, normalised, each with its resolved bar index. */
   getMarkers(): ResolvedMarker[]
@@ -564,18 +600,6 @@ export declare class Chart {
    */
   subscribe(event: 'error', fn: (error: unknown) => void): () => void
 
-  /** Removes listeners, canvases and the render loop. */
-  /**
-   * Restart the render loop after it gave up on consecutive frame errors.
-   * The loop stops itself after ten failing frames in a row and reports the
-   * last error through the 'error' event; fix the cause, then call this.
-   * Returns false if the chart is destroyed or the loop is already running.
-   */
-  /**
-   * Re-measure the container and canvases now. Resizes and devicePixelRatio
-   * changes are detected automatically; this is the escape hatch for layout
-   * the element cannot observe, such as being revealed from display:none.
-   */
   /**
    * Zoom and scroll so the whole dataset is on screen. Not animated.
    * Returns false when there are fewer than two bars to fit.
@@ -585,14 +609,40 @@ export declare class Chart {
    */
   fitContent(): boolean
   /**
+   * Open on a window of the data rather than all of it — a windowed
+   * fitContent(). Inclusive bar indices; the rest of the run stays loaded and
+   * pannable. Not animated.
+   *
+   * `to` sits at the right edge, and the chart stops following new bars unless
+   * `to` is the newest one. Ends outside the loaded data clamp. Returns false
+   * only when no window exists at all: a destroyed chart, fewer than two bars,
+   * or ends that are not numbers.
+   *
+   * Reading the window back with visibleRange() is not the identity of
+   * setting it — that payload also counts the partly visible bar at each edge.
+   */
+  setVisibleRange(range: VisibleRangeInput): boolean
+  /**
    * Format every rendered timestamp in `zone` — an IANA name such as
    * 'Asia/Kolkata', or null for the browser's local zone. Display only: bar
    * times, the crosshair payload and visibleRange stay in the ms epochs you
    * supplied.
    */
   setTimeZone(zone: string | null): this
+  /**
+   * Re-measure the container and canvases now. Resizes and devicePixelRatio
+   * changes are detected automatically; this is the escape hatch for layout
+   * the element cannot observe, such as being revealed from display:none.
+   */
   resize(): void
+  /**
+   * Restart the render loop after it gave up on consecutive frame errors.
+   * The loop stops itself after ten failing frames in a row and reports the
+   * last error through the 'error' event; fix the cause, then call this.
+   * Returns false if the chart is destroyed or the loop is already running.
+   */
   resume(): boolean
+  /** Removes listeners, canvases and the render loop. */
   destroy(): void
 
   readonly bars: Bar[]
@@ -600,6 +650,8 @@ export declare class Chart {
   readonly zones: Zone[]
   readonly ts: TimeScale
   readonly ps: PriceScale
+  /** The price pane's rect, live. Superseded by paneRect(id). */
+  readonly plot: Rect
 }
 
 /** Preferred entry point. */

@@ -1,4 +1,5 @@
 import { Smoothed } from '../motion/Tween.js'
+import { toNumber } from './formatters.js'
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v)
 
@@ -128,12 +129,91 @@ export class TimeScale {
   fitContent(barCount) {
     const n = Math.floor(barCount)
     if (!(n > 1) || !(this.width > 0)) return false
-    const needed = this.width / n
+    return this._window(0, n - 1)
+  }
+
+  /**
+   * Put bars `from`..`to` inclusive across the plot, `to` at the right edge —
+   * fitContent over a window rather than over the whole run, and literally
+   * that: setVisibleRange(0, barCount - 1) leaves the scale exactly where
+   * fitContent(barCount) does.
+   *
+   * Indices only. The scale holds no bars, so it cannot turn a time into one;
+   * and it holds no loop, so it cannot repaint. Chart#setVisibleRange is the
+   * supported entry point and this is the arithmetic underneath it.
+   *
+   * Ends outside the loaded data CLAMP rather than being refused. An index is
+   * written by application logic against a length it often did not know — a
+   * window chosen before the data landed, or one computed before a history
+   * page renumbered every bar — and refusing there would leave the view
+   * wherever it happened to be, which reads as the call having silently done
+   * nothing. The clamp is the caller's own arithmetic on barCount, so nothing
+   * is decided here that the caller could not have predicted.
+   *
+   * A one-bar window is WIDENED to two rather than refused. Naming a single
+   * bar is an ordinary thing to do and has no spacing to compute, and
+   * maxSpacing already flattens anything under about five bars to the same
+   * view — so refusing one while accepting two would be a distinction with no
+   * visible difference.
+   *
+   * The minSpacing rule fitContent documents above is inherited rather than
+   * reconsidered, and a windowed fit never reaches it: a hundred bars across
+   * an 832px plot needs 8.3px each, ten times the default floor. It fires
+   * only for a window WIDER than interactive zoom allows, and there clamping
+   * would show a different window from the one named while still reporting
+   * success — the one failure this method must not have.
+   */
+  setVisibleRange(from, to) {
+    const last = this.barCount - 1
+    if (!(last > 0) || !(this.width > 0)) return false
+    // toNumber, not +: `+null` is 0 and `Math.floor(null)` is 0, so a
+    // half-filled window — { from: saved ?? null, to: 99 } — would read as
+    // bar 0 and show a window nobody asked for. Same guard, same reason, as
+    // the one prices go through.
+    let a = toNumber(from)
+    let b = toNumber(to)
+    if (!isFinite(a) || !isFinite(b)) return false
+    // (to, from) has exactly one possible meaning. Refusing it buys the caller
+    // no information and costs them the silent no-op described above.
+    //
+    // BEFORE the rounding, not after. Rounding first turns a reversed
+    // fractional window into a NARROWER one — (99.5, 0.4) floors the high end
+    // to 99 and ceils the low end to 1, then swaps, so the window arrives
+    // 1..99 having lost a bar at each end, which is the one thing the
+    // widening below exists to prevent.
+    if (a > b) { const t = a; a = b; b = t }
+    // Fractional ends WIDEN, never narrow: a caller that computed 99.5 wants
+    // bar 99 on screen, and honouring the fraction by hiding it would break
+    // the one postcondition this method has.
+    a = Math.floor(a)
+    b = Math.ceil(b)
+    a = clamp(a, 0, last)
+    b = clamp(b, 0, last)
+    if (a === b) { if (b < last) b++; else a-- }
+    return this._window(a, b)
+  }
+
+  /**
+   * The arithmetic both fits share: `to - from + 1` bars across the plot with
+   * `to` on the right edge, immediately.
+   *
+   * `follow` is DERIVED here rather than set. It is not a preference but a
+   * claim of fact — the right edge IS the newest bar — which panBy() clears,
+   * setBarCount() reads to decide whether to glide, and zoomAt() pairs with
+   * `live` to choose its anchor. A window short of the newest bar that went on
+   * following is re-targeted by the very next append(): measured on a 29,000
+   * bar set, one appended bar moved a window pinned at 0..99 to 6306..6409 on
+   * the first frame, and no call ordering prevents it. fitContent's
+   * unconditional `true` was this same expression evaluated on the only input
+   * Chart ever gives it, since it always passes the whole bar count.
+   */
+  _window(from, to) {
+    const needed = this.width / (to - from + 1)
     if (needed < this.minSpacing) this.minSpacing = Math.max(needed, FIT_FLOOR)
     this._spacing.jump(clamp(needed, this.minSpacing, this.maxSpacing))
-    // No rightOffset: fitting the content means the newest bar IS the edge.
-    this._right.jump(n - 1)
-    this.follow = true
+    // No rightOffset: naming the bar at the edge means it IS the edge.
+    this._right.jump(to)
+    this.follow = to >= this.barCount - 1
     return true
   }
 

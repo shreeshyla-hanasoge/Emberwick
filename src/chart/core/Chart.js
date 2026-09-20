@@ -1,4 +1,4 @@
-import { createTimeFormatter } from './formatters.js'
+import { createTimeFormatter, toNumber } from './formatters.js'
 import { Layers } from './Layers.js'
 import { Loop } from './Loop.js'
 import { TimeScale } from './TimeScale.js'
@@ -273,7 +273,31 @@ export class Chart {
     this.ts.setBarCount(this.bars.length)
     this.ts.snapToRealtime()
     this.live.reset()
-    this.ps._primed = false
+    // A manual price window belongs to the dataset it was chosen against. When
+    // the replacement bars fall entirely outside it the reader is left staring
+    // at blank space, with the axis not even drawn to explain why. So hand the
+    // scale back to autoscale, exactly as ts.snapToRealtime() just did for
+    // time. Bars that still OVERLAP keep the window, which is what lets a reader
+    // toggle a series on the same data without losing the pan they chose.
+    if (!this.ps.auto && this.bars.length) {
+      let min = Infinity
+      let max = -Infinity
+      for (const b of this.bars) {
+        const lo = toNumber(b.low)
+        const hi = toNumber(b.high)
+        if (lo < min) min = lo
+        if (hi > max) max = hi
+      }
+      if (isFinite(min) && isFinite(max) && (max < this.ps.lo || min > this.ps.hi)) {
+        this.ps.resetAuto()
+      }
+    }
+    // Unprimed only if it is going to re-fit. A manual window we deliberately
+    // KEPT is a real range, and unpriming it would stop drawPriceAxis drawing
+    // the axis at all — the reader's pan survives on candles it can no longer
+    // read a price off. Unpriming an auto scale is what makes the first fit of
+    // the new data jump rather than glide across from the old instrument.
+    if (this.ps.auto) this.ps._primed = false
     this.loop.invalidate('all')
   }
 
@@ -488,6 +512,54 @@ export class Chart {
   }
 
   // ---------------------------------------------------------------- events --
+  /**
+   * What a drag starting at (x, y) does, and to which pane's scale.
+   *
+   * Two independent questions, which one ternary used to conflate:
+   *
+   * - 'pan' vs 'time' is about the PLOT. The boundary is the
+   *   bottom of the LAST pane. It used to be `plot.h`, which stopped meaning
+   *   "the bottom of the plot" the moment a second pane existed — the same
+   *   trap that drew the time axis between the panes in 0.9.0 — so every
+   *   pointer below the price pane read as being on the time axis, and a
+   *   horizontal drag inside an oscillator zoomed the chart instead of
+   *   panning it. On a 3:1 layout that is 30% of the plot; on 3:1:1, 48%.
+   *
+   * - 'price' is the only mode that needs a TARGET, and it is the pane beside
+   *   the pointer, not pane 0. Dragging the gutter next to an oscillator used
+   *   to stretch the price scale — the pane the reader was not pointing at.
+   *
+   * The seam between two panes, and the corner where both gutters meet,
+   * resolve to the nearest pane rather than to none. paneAtY returning null
+   * is right for the crosshair, which must go quiet off-pane; for a gesture
+   * already in flight there is no "no pane" to act on, and nearest keeps a
+   * single-pane chart behaving exactly as it always has, since the nearest
+   * pane is then always pane 0.
+   */
+  _classifyDrag(x, y) {
+    if (x > this.plot.w) return { mode: 'price', pane: this._paneNear(y) }
+    const last = this._panes[this._panes.length - 1].rect
+    if (y > last.y + last.h) return { mode: 'time', pane: null }
+    // A pan carries a pane because it is free in both axes: dx moves the shared
+    // time scale, dy moves the price scale of the pane under the pointer. Only
+    // that pane's, never every pane's — the panes hold unrelated quantities, and
+    // dragging a price chart has no business shifting an RSI off its 0..100.
+    return { mode: 'pan', pane: this._paneNear(y) }
+  }
+
+  /** The pane containing `y`, or the closest one — never null. */
+  _paneNear(y) {
+    const hit = paneAtY(this._panes, y)
+    if (hit) return hit
+    let best = this._panes[0]
+    let bestGap = Infinity
+    for (const pane of this._panes) {
+      const gap = y < pane.rect.y ? pane.rect.y - y : y - (pane.rect.y + pane.rect.h)
+      if (gap < bestGap) { bestGap = gap; best = pane }
+    }
+    return best
+  }
+
   _bindEvents() {
     const el = this.container
     el.style.touchAction = 'none'
@@ -495,6 +567,24 @@ export class Chart {
 
     let dragging = false
     let mode = null
+    /**
+     * The pane a 'price' drag stretches, latched for the whole gesture.
+     *
+     * Latched, not re-resolved per move, for the same reason `mode` is: a
+     * drag that wanders across a pane boundary must go on stretching the
+     * scale it started on, or one continuous finger movement silently
+     * retargets and stretches two.
+     *
+     * The Pane OBJECT rather than an id or a rect copy — Panes.js documents
+     * the rect as mutated in place, so the latch survives a resize landing
+     * mid-drag, which a copy would not.
+     */
+    let dragPane = null
+    // How far this gesture has panned vertically, and whether the pane was
+    // autoscaling before it started — both needed to UNDO the pan if the
+    // browser takes the gesture away. See _onCancel.
+    let panDy = 0
+    let paneWasAuto = true
     let lastX = 0
     let lastY = 0
     let lastT = 0
@@ -518,7 +608,11 @@ export class Chart {
       const p = localPos(e)
       dragging = true
       moved = false
-      mode = p.x > this.plot.w ? 'price' : p.y > this.plot.h ? 'time' : 'pan'
+      const target = this._classifyDrag(p.x, p.y)
+      mode = target.mode
+      dragPane = target.pane
+      panDy = 0
+      paneWasAuto = dragPane ? dragPane.ps.auto : true
       lastX = p.x
       lastY = p.y
       lastT = performance.now()
@@ -555,11 +649,16 @@ export class Chart {
 
       if (mode === 'pan') {
         this.ts.panBy(dx)
+        // Inertia stays horizontal. It models a flick along the time axis,
+        // where there is more data to glide into; a vertical throw would coast
+        // the range off the candles and leave the reader looking at blank space
+        // with no data to stop it.
+        if (dragPane) { dragPane.ps.panBy(dy); panDy += dy }
         this.inertia.sample(dx, dt)
         this.loop.invalidate('all')
         this._maybeLoadHistory()
       } else if (mode === 'price') {
-        this.ps.scaleBy(1 + dy / 220)
+        dragPane.ps.scaleBy(1 + dy / 220)
         this.loop.invalidate('all')
       } else if (mode === 'time') {
         this.ts.zoomAt(this.plot.w, 1 - dx / 260)
@@ -571,6 +670,28 @@ export class Chart {
       lastT = now
     }
 
+    /**
+     * The browser took the gesture — on touch, that is a page scroll starting.
+     *
+     * `touch-action: pan-y` still delivers the first few pointermoves before
+     * the user agent decides the drag belongs to the page, so a vertical pan
+     * has already been applied by the time pointercancel arrives. Left alone
+     * it sticks: every scroll past an inline chart would nudge it a few pixels
+     * and, worse, leave it out of autoscale for good, because a pan is a
+     * deliberate act and panBy clears `auto`. So unwind exactly what this
+     * gesture did. panBy is a pure translation and the span it divides by is
+     * unchanged, so -panDy is its exact inverse.
+     */
+    this._onCancel = (e) => {
+      if (dragPane && panDy) {
+        dragPane.ps.panBy(-panDy)
+        if (paneWasAuto) dragPane.ps.resetAuto()
+        this.loop.invalidate('all')
+      }
+      panDy = 0
+      this._onUp(e)
+    }
+
     this._onUp = (e) => {
       pointers.delete(e.pointerId)
       if (pointers.size < 2) pinchDist = 0
@@ -580,6 +701,8 @@ export class Chart {
       }
       dragging = false
       mode = null
+      dragPane = null
+      panDy = 0
       try { el.releasePointerCapture(e.pointerId) } catch (_) {}
     }
 
@@ -599,9 +722,31 @@ export class Chart {
       this._maybeLoadHistory()
     }
 
-    this._onDbl = () => {
-      this.ts.reset()
-      this.ps.resetAuto()
+    /**
+     * Double-click resets the axis it lands on, and both from the plot.
+     *
+     * It is classified by _classifyDrag, the same function the drag itself
+     * goes through, so the region that scales an axis is by construction the
+     * region that resets it — two hit tests would be two chances to disagree
+     * about where the gutter starts.
+     *
+     * The plot keeps resetting both, which is what it did before free panning
+     * existed and still the only gesture that undoes a pan in one action.
+     */
+    this._onDbl = (e) => {
+      // An event with no coordinates resets everything, which is what a
+      // double-click did before it was scoped at all. A DOM dblclick always
+      // carries a position, so this is for a synthetic one -- and "reset the
+      // whole chart" is the only honest reading of a gesture that did not say
+      // where it landed.
+      let hit = { mode: 'pan', pane: null }
+      if (isFinite(e?.clientX) && isFinite(e?.clientY)) {
+        const p = localPos(e)
+        hit = this._classifyDrag(p.x, p.y)
+      }
+      if (hit.mode === 'price') hit.pane.ps.resetAuto()
+      else if (hit.mode === 'time') this.ts.reset()
+      else { this.ts.reset(); this._resetAutoScales() }
       this.loop.invalidate('all')
     }
 
@@ -629,7 +774,7 @@ export class Chart {
     el.addEventListener('pointerdown', this._onDown)
     el.addEventListener('pointermove', this._onMove)
     el.addEventListener('pointerup', this._onUp)
-    el.addEventListener('pointercancel', this._onUp)
+    el.addEventListener('pointercancel', this._onCancel)
     el.addEventListener('pointerleave', this._onLeave)
     el.addEventListener('wheel', this._onWheel, { passive: false })
     el.addEventListener('dblclick', this._onDbl)
@@ -640,10 +785,20 @@ export class Chart {
   _emitCrosshair(p) {
     if (this._listeners.crosshair.size) {
       let payload = null
-      if (p && this.bars.length && p.x <= this.plot.w && p.y <= this.plot.h) {
+      // Resolve the pane under the pointer, not the price pane. The crosshair
+      // is DRAWN in whichever pane the cursor is in; before this the payload
+      // was bounded by pane 0's rect and read pane 0's scale, so hovering an
+      // oscillator drew a crosshair and reported null — a legend went blank
+      // exactly where the user was looking.
+      const pane = p && this.bars.length && p.x >= 0 && p.x <= this.plot.w
+        ? paneAtY(this._panes, p.y)
+        : null
+      if (pane) {
         const i = Math.round(this.ts.index(p.x))
         const bar = this.bars[i]
-        if (bar) payload = { index: i, bar, price: this.ps.price(p.y) }
+        // `price` is in THAT pane's scale, so `pane` has to come with it —
+        // 63.4 means nothing without knowing it is the RSI pane.
+        if (bar) payload = { index: i, bar, price: pane.ps.price(p.y), pane: pane.id }
       }
       for (const fn of this._listeners.crosshair) fn(payload)
     }
@@ -1206,6 +1361,11 @@ export class Chart {
     this.loop.invalidate('all')
   }
 
+  /**
+   * The PRICE pane's scale only, deliberately — not a loop over the panes the
+   * way a reset is. Log is a statement about prices; an oscillator bounded on
+   * 0..100 has no business on one, and RSI 0 has no logarithm at all.
+   */
   setPriceMode(mode) {
     this.ps.setMode(mode)
     this.loop.invalidate('all')
@@ -1231,17 +1391,91 @@ export class Chart {
    * Returns false when there are fewer than two bars to fit.
    */
   fitContent() {
-    if (this._destroyed) return false
+    if (this._destroyed || !this._laidOut()) return false
     if (!this.ts.fitContent(this.bars.length)) return false
-    this.ps.resetAuto()
+    this.inertia.stop()
+    this._resetAutoScales()
+    this.loop.invalidate('all')
+    return true
+  }
+
+  /**
+   * Open on a WINDOW of the data rather than all of it.
+   *
+   *   chart.setData(bars)
+   *   chart.setVisibleRange({ from: 0, to: 99 })
+   *
+   * fitContent() for a run you mean to read forward. Fitting a finished
+   * backtest whole is the honest view of the dataset and a useless first
+   * impression — 29,000 bars across an 832px plot is 0.03px each, every
+   * series collapses onto every other and layoutMarkers thins the trades to
+   * one per four pixels. The rest of the run stays loaded and pannable: this
+   * is a view, not a filter.
+   *
+   * Inclusive bar indices. An object rather than two arguments so the window
+   * is named the way visibleRange() already names it, and so the
+   * { fromTime, toTime } variant this will eventually want arrives as a field
+   * rather than as a second method.
+   *
+   * Ends outside the data CLAMP — see TimeScale#setVisibleRange. False is kept
+   * for what no clamp can rescue: a destroyed chart, fewer than two bars
+   * loaded, ends that are not numbers. So a call that raced the data load is
+   * still loud rather than quietly showing some other window.
+   *
+   * Reading the window back is not the identity of setting it: visibleRange()
+   * reports the partly visible bar at each edge too, so it answers a bar or
+   * two wider than the window you named. Save what you SET.
+   *
+   * Not animated, for the reason fitContent() is not.
+   */
+  setVisibleRange(range) {
+    if (this._destroyed || !range || !this._laidOut()) return false
+    if (!this.ts.setVisibleRange(range.from, range.to)) return false
+    this.inertia.stop()
+    this._resetAutoScales()
     this.loop.invalidate('all')
     return true
   }
 
   snapToRealtime() {
     this.ts.snapToRealtime()
-    this.ps.resetAuto()
+    this.inertia.stop()
+    this._resetAutoScales()
     this.loop.invalidate('all')
+  }
+
+  /**
+   * Whether the container has a width worth fitting a view against.
+   *
+   * A view is computed from the plot width and nothing recomputes it on the
+   * next layout, so a fit against a container that has not been laid out yet
+   * — a mount effect that beats the browser to it, or an element still
+   * display:none — is not merely approximate, it is wrong for good, and it
+   * drags minSpacing down to the fit floor on the way. TimeScale.resize
+   * clamps width to a minimum of 1, so 1 IS the "no layout yet" reading, and
+   * a chart genuinely one pixel wide has nothing to show either way.
+   *
+   * False rather than a deferred fit: all three callers return a boolean the
+   * caller can branch on, and "I will do it later" is the kind of answer that
+   * gets discovered months afterwards.
+   */
+  _laidOut() {
+    return this.plot.w > 1
+  }
+
+  /**
+   * Every pane back to autoscale, not just the price pane.
+   *
+   * A view change re-frames what is on screen, so a pane still holding a
+   * hand-set range is describing bars that are no longer there. `this.ps` is
+   * a getter onto _panes[0] and was written when that was the only scale
+   * there was — the same pane-blindness the crosshair payload had, and it
+   * became reachable the moment a drag beside a sub-pane could stretch that
+   * sub-pane: double-click is the documented way out of a hand-set scale, and
+   * it was releasing a pane the user had never touched.
+   */
+  _resetAutoScales() {
+    for (const pane of this._panes) pane.ps.resetAuto()
   }
 
   /**
@@ -1298,7 +1532,7 @@ export class Chart {
     el.removeEventListener('pointerdown', this._onDown)
     el.removeEventListener('pointermove', this._onMove)
     el.removeEventListener('pointerup', this._onUp)
-    el.removeEventListener('pointercancel', this._onUp)
+    el.removeEventListener('pointercancel', this._onCancel)
     el.removeEventListener('pointerleave', this._onLeave)
     el.removeEventListener('wheel', this._onWheel)
     el.removeEventListener('dblclick', this._onDbl)

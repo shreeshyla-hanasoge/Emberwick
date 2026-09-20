@@ -3,6 +3,225 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-09-21
+
+**The view is yours to set.** A window you choose, a drag that lands where you
+point, and a README that admits what already shipped.
+
+### Added
+
+- **`chart.setVisibleRange({ from, to })`** — open on a WINDOW of the data
+  rather than all of it.
+
+  ```js
+  chart.setData(bars)                            // all 29,105 of them
+  chart.setVisibleRange({ from: 0, to: 99 })     // open on the first hundred
+  ```
+
+  `fitContent()` for a run you mean to read forward. Fitting a finished
+  backtest whole is the honest view of the dataset and a useless first
+  impression: 29,000 bars across an 832px plot is 0.03px each, every series
+  collapses onto every other, and the trade markers thin to one per four
+  pixels. The rest of the run stays loaded and pannable — a view, not a filter.
+
+  The arithmetic already existed, in `TimeScale.fitContent`; what did not was a
+  way to reach it. It was absent from the typings, and TimeScale holds no
+  reference to the loop, so calling it repainted nothing — the two-line
+  workaround in the wild was `chart.fitContent()` followed by
+  `chart.ts.fitContent(100)`, which worked only by re-targeting a frame that
+  another call had already scheduled.
+
+  Decisions worth recording:
+
+  - **`follow` is derived, not set**: `to >= barCount - 1`. It is not a
+    preference but a claim of fact — the right edge IS the newest bar — which
+    `panBy` clears and `setBarCount` reads. A window short of the newest bar
+    that went on following is re-targeted by the very next `append()`:
+    measured on 29,000 bars, one new candle moved a window pinned at 0..99 to
+    6306..6409 on the first frame. `fitContent`'s unconditional `true` was this
+    same expression evaluated on the only input Chart ever gives it.
+  - **Ends clamp, they do not refuse.** An index is written against a length
+    the caller often did not know, and a history page prepended in front of it
+    renumbers every bar. `false` is kept for what no clamp can rescue: a
+    destroyed chart, fewer than two bars, ends that are not numbers, and a
+    container the browser has not laid out yet — so a call that raced the data
+    load stays loud.
+  - **Reading the window back is not the identity of setting it.**
+    `visibleRange()` reports every bar with any pixel on screen, so it answers
+    a bar or two wider. Save what you *set*. There is a test pinning this, so
+    nobody "fixes" either half to match the other.
+  - **Indices only in v1.** A `{ fromTime, toTime }` variant is a field away,
+    and arrives as one rather than as a second method.
+
+- **`TimeScale.setVisibleRange(from, to)`** and **`TimeScale.fitContent(n)`**
+  are now declared. The second was already shipping, just untyped — which is
+  half of what made the windowed fit unreachable.
+
+- **`PriceScale.panBy(dy)`.** Translates the visible range by a pixel delta,
+  positive `dy` carrying the content down with the pointer. It is the
+  complement of `scaleBy`, which holds the midpoint and changes the span;
+  until now the price axis could be stretched but never moved, so seeing what
+  sat just above the high meant widening the range and shrinking every candle
+  to get there.
+
+  Bounds translate in *transformed* space, so a pixel is a fixed price step in
+  linear mode and a fixed ratio in log mode. It jumps rather than easing and
+  measures against the rendered value rather than the target, because a drag
+  has to track the finger exactly.
+
+  Like `scaleBy`, it clears autoscale; `resetAuto()` restores it.
+
+- **`scaleBy` is now declared** in `index.d.ts`. It was already shipping, just
+  untyped.
+
+- **`PriceScale.panBy(dy)`.** Translates the visible range by a pixel delta,
+  positive `dy` carrying the content down with the pointer. It is the
+  complement of `scaleBy`, which holds the midpoint and changes the span;
+  until now the price axis could be stretched but never moved, so seeing what
+  sat just above the high meant widening the range and shrinking every candle
+  to get there.
+
+  Bounds translate in *transformed* space, so a pixel is a fixed price step in
+  linear mode and a fixed ratio in log mode. It jumps rather than easing and
+  measures against the rendered value rather than the target, because a drag
+  has to track the finger exactly.
+
+  Like `scaleBy`, it clears autoscale; `resetAuto()` restores it.
+
+- **`scaleBy` is now declared** in `index.d.ts`. It was already shipping, just
+  untyped.
+
+### Changed
+
+- **A drag is classified against the whole plot, not against the price pane.**
+  `_onDown` tested the pointer against `plot.h`, which stopped meaning "the
+  bottom of the plot" the moment a second pane existed — so every pointer
+  below the price pane read as being on the time axis, and a horizontal drag
+  inside an oscillator ZOOMED the chart instead of panning it. On a 3:1 layout
+  that is 30% of the plot; on 3:1:1, 48%. The same trap that drew the time axis
+  between the panes in 0.9.0.
+
+  A price-axis drag now stretches the pane beside the pointer, too. Dragging
+  the gutter next to an oscillator used to stretch the price scale — the pane
+  the reader was not pointing at.
+
+  The classification is extracted as `_classifyDrag(x, y)`, which names the
+  decision so a test and a mutant can address it rather than inferring it from
+  a downstream effect. The target pane is latched for the gesture, not
+  re-resolved per move, or one continuous finger movement would silently
+  retarget halfway across a boundary.
+
+- **Every pane returns to autoscale on a view change.** `fitContent()`,
+  `setVisibleRange()`, `snapToRealtime()` and the double-click reset all went
+  through `chart.ps`, a getter onto pane 0. Harmless while nothing could put a
+  sub-pane scale into manual — and the drag fix above is exactly what could.
+  Double-click is the documented way out of a hand-set scale, and it was
+  releasing a pane the reader had never touched.
+
+- **A programmatic view change cancels an in-flight pan glide.** `fitContent`
+  and `setVisibleRange` jump the scale but scheduled nothing to stop the
+  inertia, so a flick still gliding kept feeding `panBy` into the frame and
+  dragged the window away over the next second — measured at 55 bars, with the
+  call already returned `true` and documented as not animated. A pointerdown
+  on the chart already stopped inertia; a toolbar button outside it did not.
+
+- **A plot drag pans vertically as well as horizontally.** `dy` used to be
+  computed and discarded. It now drives the price scale of the pane under the
+  pointer — only that pane's, since panes hold unrelated quantities and
+  dragging a price chart has no business shifting an RSI off its 0–100.
+
+  Inertia stays horizontal. It models a flick along the time axis, where there
+  is more data to glide into; a vertical throw would coast the range off the
+  candles into blank space with nothing to stop it.
+
+- **Double-click resets the axis it lands on.** The price gutter returns that
+  pane to autoscale, the time axis resets the time scale, and the plot still
+  resets both as it always has. The region is resolved by the same
+  `_classifyDrag` the drag itself uses, so the area that scales an axis is by
+  construction the area that resets it.
+
+  A double-click carrying no coordinates still resets everything.
+
+### Fixed
+
+- **A gesture the browser takes away no longer leaves the chart nudged.**
+  Under `touch-action: pan-y` — what an embedded chart in a scrolling page
+  sets so the reader can still scroll past it — the user agent delivers the
+  first few pointermoves and only then decides the drag is a page scroll and
+  fires `pointercancel`. Those moves used to stick, and because any pan clears
+  autoscale they stuck *permanently*: scrolling past a chart would walk its
+  price axis off the candles. The vertical part of a cancelled gesture is now
+  unwound exactly.
+
+- **Replacing the bars while the price scale is manual no longer blanks the
+  chart.** `setData` unprimes the scale but left `auto` alone, and `endFit()`
+  bails while `auto` is false — so a manual window from the previous dataset
+  survived onto bars it could not see, with the axis not even drawn to explain
+  why. New bars that fall entirely outside the manual window now restore
+  autoscale, the way `setData` already re-anchors time. Bars that still
+  overlap keep the reader's window, so toggling a series on the same data
+  leaves their pan alone.
+
+  The kept window is no longer unprimed either. `_primed` is cleared only for
+  a scale that is actually going to re-fit; unpriming one whose range we have
+  deliberately KEPT left a real window with an axis that was never drawn —
+  the same blank axis, reached by the other branch.
+
+- **A scale dragged before it was ever fitted can still fit.** `endFit()`
+  returned early on `auto === false`, which is right for a manual range that
+  EXISTS and wrong for one that does not: a scale taken out of autoscale
+  before its first fit could never acquire one, and `drawPriceAxis` declines
+  to draw an unprimed axis, so the pane went blank for good. Reachable as soon
+  as a gutter drag started addressing the pane beside the pointer — an
+  oscillator whose series are hidden, or not loaded yet, was one drag from
+  permanent.
+
+- **The crosshair time tag is drawn below the last pane.** `drawCrosshair` is
+  handed the hovered PANE's rect, so `plot.h` is that pane's height: hovering
+  an oscillator put the timestamp a third of the way up the chart, in the
+  middle of the candles. Measured at y=149 on a pane spanning 337..474. This
+  is the same defect the 0.9.0 notes record for the time axis — `grid.js` was
+  fixed in that sweep and this renderer was missed, so it now reads the same
+  `plotBottom`, with the same `isFinite` guard.
+
+- **A reversed *fractional* window no longer narrows.** `setVisibleRange`
+  rounded before it swapped, so `{ from: 99.5, to: 0.4 }` floored the high end
+  and ceiled the low one and arrived a bar narrower at each end — the exact
+  opposite of the widening the rounding exists to guarantee.
+
+### Documentation
+
+- **"Known gaps" no longer denies two features 0.8.0 shipped.** The section
+  listed timezone control and session-boundary labelling as missing while the
+  same README documented both — an entire "Time zones" section, a methods-table
+  row, and the day-boundary rule. The timezone entry was the actively harmful
+  one: it told a reader that exchange-local wall-clock timestamps "will render
+  shifted", which is precisely the case `timeZone: 'UTC'` now handles.
+
+  The rest of the section was audited against the source in the same pass,
+  since it predated 0.7.0. The `RandomFeed` seam is described by its actual
+  cause; the ESM-only entry no longer denies the UMD bundle the same README
+  tells people to load from a CDN, and names the real constraint (no `require`
+  export condition); the hand-written-types entry adds that nothing in CI
+  checks them. Two gaps that panes introduced and nobody had listed are now
+  listed: annotations are price-pane only, and a pane cannot be reweighted or
+  moved short of removing it.
+
+### Notes
+
+- `chart.ts.fitContent(n)` with an `n` that is not the bar count now derives
+  `follow: false` where it latched `true`. That call is the workaround this
+  release replaces; `Chart.fitContent()` always passes the whole bar count and
+  is bit-identical.
+- `minSpacing` is still lowered by a fit and never raised back, so a wide
+  window leaves the interactive floor where it put it. Pre-existing, inherited
+  rather than reconsidered.
+- The DOM stub gained `setPointerCapture`, without which no pointer handler
+  was reachable from a test at all — every gesture test here is new ground.
+- Free panning is not yet written up in the README beyond the Interaction
+  table.
+- 45 tests and 21 mutants. 183 tests, 107/107 mutants caught.
+
 ## [0.9.0] — 2026-09-20
 
 **Panes.** An oscillator can have a scale of its own.

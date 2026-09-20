@@ -50,6 +50,13 @@ export function drawnValues(chart, layer, prop) {
   return canvas.ops.filter((o) => o.op === 'set' && o.prop === prop).map((o) => o.value)
 }
 
+/** Every fillText on a layer this frame, with where it landed. */
+export function drawnText(chart, layer) {
+  return chart.layers.canvas[layer].ops
+    .filter((o) => o.op === 'fillText')
+    .map((o) => ({ text: String(o.args[0]), x: o.args[1], y: o.args[2] }))
+}
+
 /** Clear the recorded ops on every layer — call before the frame you care about. */
 export function clearOps(chart) {
   for (const name of chart.layers.names) chart.layers.canvas[name].ops.length = 0
@@ -64,6 +71,11 @@ export function makeContainer({ width = 900, height = 500 } = {}) {
     appendChild(c) { this.children.push(c) },
     addEventListener: noop,
     removeEventListener: noop,
+    // Chart captures the pointer on every pointerdown, so without these no
+    // gesture handler is reachable from a test at all — the down path threw
+    // before it classified anything.
+    setPointerCapture: noop,
+    releasePointerCapture: noop,
     hasAttribute: (k) => attrs.has(k),
     setAttribute: (k, v) => attrs.set(k, v),
     getAttribute: (k) => attrs.get(k),

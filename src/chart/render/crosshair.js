@@ -62,14 +62,21 @@ export function drawCrosshair(ctx, s) {
 
   // time tag
   if (bar) {
+    // Against the bottom of the WHOLE plot, the same quantity and the same
+    // guard drawGrid uses. `plot` here is the hovered PANE's rect, so plot.h
+    // is that pane's height — hovering an oscillator put the timestamp a
+    // third of the way up the chart, in the middle of the candles. The same
+    // trap that drew the time axis between the panes in 0.9.0; grid.js was
+    // fixed in that sweep and this renderer was missed.
+    const bottom = isFinite(s.plotBottom) ? s.plotBottom : plot.y + plot.h
     const t = s.fmt.full(bar.time)
     ctx.textAlign = 'center'
     const tw = ctx.measureText(t).width
     const bx = Math.min(Math.max(x, tw / 2 + 6), plot.w - tw / 2 - 6)
     ctx.fillStyle = theme.labelBg
-    ctx.fillRect(bx - tw / 2 - 7, plot.h + 3, tw + 14, 18)
+    ctx.fillRect(bx - tw / 2 - 7, bottom + 3, tw + 14, 18)
     ctx.fillStyle = theme.labelText
-    ctx.fillText(t, bx, plot.h + 12)
+    ctx.fillText(t, bx, bottom + 12)
   }
 }
 

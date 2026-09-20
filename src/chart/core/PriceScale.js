@@ -134,7 +134,15 @@ export class PriceScale {
    * on a chart can be hidden it stops being one.
    */
   endFit() {
-    if (!this.auto) return
+    // `&& this._primed` matters. A scale taken out of autoscale before it ever
+    // had a range can otherwise never acquire one — endFit is the only thing
+    // that sets _primed, and drawPriceAxis declines to draw an unprimed axis,
+    // so the pane goes blank for good. That became reachable when a drag
+    // beside a sub-pane started addressing THAT pane: a pane whose series are
+    // hidden, or not loaded yet, is unprimed and one drag from permanent.
+    // A manual range that DOES exist is still left alone, which is the whole
+    // point of the early return.
+    if (!this.auto && this._primed) return
     const min = this._fitMin
     const max = this._fitMax
     if (!isFinite(min) || !isFinite(max)) return
@@ -178,6 +186,38 @@ export class PriceScale {
     const half = ((b - a) / 2) * clamp(factor, 0.2, 5)
     this._lo.set(mid - half)
     this._hi.set(mid + half)
+  }
+
+  /**
+   * Manual axis drag: TRANSLATE the range by a pixel delta, positive `dy`
+   * carrying the content down with the finger.
+   *
+   * scaleBy is the other half of manual control and only ever stretched about
+   * the centre, so until this existed the vertical axis could be zoomed but
+   * never moved: a reader who wanted to see what sat just above the high had
+   * to widen the whole range and shrink every candle to get there. Dragging
+   * the plot moved the chart sideways and ignored `dy` entirely.
+   *
+   * Bounds are translated in TRANSFORMED space, which is the space the axis
+   * renders in, so one pixel means a fixed price step in linear mode and a
+   * fixed RATIO in log mode — a log chart panned by price would compress as
+   * it rose and tear away from the pointer.
+   *
+   * It jumps rather than easing, and reads `.value` rather than `.target`,
+   * because a drag has to track the finger exactly. Easing toward a target
+   * would trail the pointer by the tau, and measuring the step against a
+   * target the render has not reached yet would move the content by a
+   * different number of pixels than the finger travelled.
+   */
+  panBy(dy) {
+    const d = toNumber(dy)
+    if (!isFinite(d) || d === 0) return
+    this.auto = false
+    const a = this._lo.value
+    const b = this._hi.value
+    const step = (d * (b - a)) / this.height
+    this._lo.jump(a + step)
+    this._hi.jump(b + step)
   }
 
   resetAuto() {

@@ -386,9 +386,9 @@ export const MUTANTS = [
     replace: '',
   },
   {
-    name: 'fitContent does not move the right edge',
+    name: 'A fit does not move the right edge',
     file: 'src/chart/core/TimeScale.js',
-    find: '    this._right.jump(n - 1)',
+    find: '    this._right.jump(to)',
     replace: '',
   },
   {
@@ -398,9 +398,11 @@ export const MUTANTS = [
     replace: '    if (n < 0) return false',
   },
   {
+    // mutate.mjs replaces the FIRST match, and fitContent precedes
+    // setVisibleRange in the file, so this still targets fitContent.
     name: 'fitContent leaves the price scale manually scaled',
     file: 'src/chart/core/Chart.js',
-    find: '    this.ps.resetAuto()\n    this.loop.invalidate(\'all\')\n    return true',
+    find: '    this._resetAutoScales()\n    this.loop.invalidate(\'all\')\n    return true',
     replace: "    this.loop.invalidate('all')\n    return true",
   },
   {
@@ -540,5 +542,134 @@ export const MUTANTS = [
     file: 'src/chart/core/Chart.js',
     find: "    if (key === PRICE_PANE) throw new Error('Chart: the price pane cannot be removed')",
     replace: '',
+  },
+  {
+    name: 'The crosshair payload reads the price pane whatever pane is hovered',
+    file: 'src/chart/core/Chart.js',
+    find: '        if (bar) payload = { index: i, bar, price: pane.ps.price(p.y), pane: pane.id }',
+    replace: '        if (bar) payload = { index: i, bar, price: this.ps.price(p.y), pane: pane.id }',
+  },
+  {
+    name: 'The crosshair event goes silent outside the price pane',
+    file: 'src/chart/core/Chart.js',
+    find: '        ? paneAtY(this._panes, p.y)',
+    replace: '        ? (p.y <= this.plot.h ? this._panes[0] : null)',
+  },
+  {
+    name: 'A window short of the newest bar goes on following the feed',
+    file: 'src/chart/core/TimeScale.js',
+    find: '    this.follow = to >= this.barCount - 1',
+    replace: '    this.follow = true',
+  },
+  {
+    name: 'setVisibleRange refuses an out-of-range window instead of clamping',
+    file: 'src/chart/core/TimeScale.js',
+    find: '    a = clamp(a, 0, last)\n    b = clamp(b, 0, last)',
+    replace: '    if (a < 0 || b > last) return false',
+  },
+  {
+    name: 'A one-bar window is refused instead of widened',
+    file: 'src/chart/core/TimeScale.js',
+    find: '    if (a === b) { if (b < last) b++; else a-- }',
+    replace: '    if (a === b) return false',
+  },
+  {
+    name: 'A half-filled window reads null as bar 0',
+    file: 'src/chart/core/TimeScale.js',
+    find: '    let a = toNumber(from)\n    let b = toNumber(to)',
+    replace: '    let a = +from\n    let b = +to',
+  },
+  {
+    name: 'A fractional window narrows instead of widening',
+    file: 'src/chart/core/TimeScale.js',
+    find: '    a = Math.floor(a)\n    b = Math.ceil(b)',
+    replace: '    a = Math.ceil(a)\n    b = Math.floor(b)',
+  },
+  {
+    // Anchored from the guard line above, because `inertia.stop()` followed by
+    // `_resetAutoScales()` also appears in fitContent and snapToRealtime, and
+    // mutate.mjs replaces the FIRST match.
+    name: 'setVisibleRange leaves every scale hand-stretched',
+    file: 'src/chart/core/Chart.js',
+    find: "    if (!this.ts.setVisibleRange(range.from, range.to)) return false\n    this.inertia.stop()\n    this._resetAutoScales()",
+    replace: "    if (!this.ts.setVisibleRange(range.from, range.to)) return false\n    this.inertia.stop()",
+  },
+  {
+    name: 'Only the price pane returns to autoscale',
+    file: 'src/chart/core/Chart.js',
+    find: '    for (const pane of this._panes) pane.ps.resetAuto()',
+    replace: '    this._panes[0].ps.resetAuto()',
+  },
+  {
+    name: 'A drag is classified against the price pane, not the whole plot',
+    file: 'src/chart/core/Chart.js',
+    find: '    if (y > last.y + last.h) return { mode: \'time\', pane: null }',
+    replace: '    if (y > this.plot.h) return { mode: \'time\', pane: null }',
+  },
+  {
+    name: 'A price-axis drag always targets the price pane',
+    file: 'src/chart/core/Chart.js',
+    find: "    if (x > this.plot.w) return { mode: 'price', pane: this._paneNear(y) }",
+    replace: "    if (x > this.plot.w) return { mode: 'price', pane: this._panes[0] }",
+  },
+  {
+    name: 'The pane beside the seam or the corner resolves to nothing',
+    file: 'src/chart/core/Chart.js',
+    find: '    const hit = paneAtY(this._panes, y)\n    if (hit) return hit',
+    replace: '    return paneAtY(this._panes, y)\n    // eslint-disable-line',
+  },
+  {
+    name: 'The drag target is re-resolved on every move instead of latched',
+    file: 'src/chart/core/Chart.js',
+    find: '        dragPane.ps.scaleBy(1 + dy / 220)',
+    replace: '        this._paneNear(p.y).ps.scaleBy(1 + dy / 220)',
+  },
+  {
+    name: 'A reversed fractional window narrows instead of widening',
+    file: 'src/chart/core/TimeScale.js',
+    find: '    if (a > b) { const t = a; a = b; b = t }\n    // Fractional ends WIDEN',
+    replace: '    // Fractional ends WIDEN',
+  },
+  {
+    name: 'A fit runs against a container the browser has not laid out',
+    file: 'src/chart/core/Chart.js',
+    find: '    return this.plot.w > 1',
+    replace: '    return true',
+  },
+  {
+    name: 'A pan glide goes on dragging the window that was just set',
+    file: 'src/chart/core/Chart.js',
+    find: "    if (!this.ts.setVisibleRange(range.from, range.to)) return false\n    this.inertia.stop()",
+    replace: '    if (!this.ts.setVisibleRange(range.from, range.to)) return false',
+  },
+  {
+    name: 'A scale dragged before it was ever fitted can never fit',
+    file: 'src/chart/core/PriceScale.js',
+    find: '    if (!this.auto && this._primed) return',
+    replace: '    if (!this.auto) return',
+  },
+  {
+    name: 'A kept price window is unprimed, so its axis is never drawn',
+    file: 'src/chart/core/Chart.js',
+    find: '    if (this.ps.auto) this.ps._primed = false',
+    replace: '    this.ps._primed = false',
+  },
+  {
+    name: 'The crosshair time tag is drawn at the hovered pane height',
+    file: 'src/chart/render/crosshair.js',
+    find: "    const bottom = isFinite(s.plotBottom) ? s.plotBottom : plot.y + plot.h\n    const t = s.fmt.full(bar.time)",
+    replace: '    const bottom = plot.h\n    const t = s.fmt.full(bar.time)',
+  },
+  {
+    name: 'The nearest pane is resolved by the furthest edge',
+    file: 'src/chart/core/Chart.js',
+    find: '      if (gap < bestGap) { bestGap = gap; best = pane }',
+    replace: '      if (gap > bestGap) { bestGap = gap; best = pane }',
+  },
+  {
+    name: 'A fit floor below FIT_FLOOR is taken instead of clamped',
+    file: 'src/chart/core/TimeScale.js',
+    find: '    if (needed < this.minSpacing) this.minSpacing = Math.max(needed, FIT_FLOOR)',
+    replace: '    if (needed < this.minSpacing) this.minSpacing = Math.min(needed, FIT_FLOOR)',
   },
 ]

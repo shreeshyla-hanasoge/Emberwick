@@ -264,6 +264,7 @@ const chart = createChart(el, {
 | `chart.replay` | Getter — the active `Replay` controller, or `null` |
 | `toImage()` | PNG data URL of the composited layers |
 | `fitContent()` | Zoom and scroll so the whole dataset is on screen. Not animated |
+| `setVisibleRange({ from, to })` | Open on a window of it instead — inclusive bar indices. Not animated |
 | `setTimeZone(zone)` | Format every rendered timestamp in an IANA zone, or `null` for local |
 | `resize()` | Re-measure the container now. Resizes and pixel-ratio changes are automatic |
 | `resume()` | Restart the render loop after it gave up. See below |
@@ -274,8 +275,8 @@ const chart = createChart(el, {
 
 ```js
 const off = chart.subscribe('crosshair', (payload) => {
-  if (!payload) return           // pointer left the plot
-  const { index, bar, price } = payload
+  if (!payload) return           // pointer is on no pane
+  const { index, bar, price, pane } = payload   // `price` is in THAT pane's scale
   legend.textContent = `O ${bar.open} H ${bar.high} L ${bar.low} C ${bar.close}`
 })
 off()  // unsubscribe
@@ -283,7 +284,7 @@ off()  // unsubscribe
 
 | Event | Payload |
 |---|---|
-| `'crosshair'` | `{ index, bar, price }`, or `null` when the pointer leaves the plot |
+| `'crosshair'` | `{ index, bar, price, pane }`, or `null` when the pointer is on no pane — off the plot, on the time axis, or in the seam between two |
 | `'markerHover'` | The marker under the pointer, or `null` when none is |
 | `'markerClick'` | The clicked marker. Only fires on a hit, never with `null` |
 | `'visibleRange'` | `{ from, to, fromTime, toTime, barCount, spacing, settled }` |
@@ -740,18 +741,58 @@ explicit "show me everything" is a different intent, and clamping it would
 both hide part of the dataset and make the next zoom-in jump back up to the
 old floor.
 
+### A window of it, instead
+
+```js
+chart.setData(bars)                            // all 29,105 of them
+chart.setVisibleRange({ from: 0, to: 99 })     // open on the first hundred
+```
+
+For a run you mean to read **forward**. Fitting a finished backtest whole is
+the honest view of the dataset and a useless first impression: 29,000 bars
+across an 832px plot is 0.03px each, every series collapses onto every other,
+and the trade markers thin to one per four pixels. The rest of the run stays
+loaded and pannable — this is a view, not a filter.
+
+Inclusive bar indices, `to` at the right edge. Ends outside the loaded data
+clamp, a reversed pair is swapped, and a one-bar window widens to two; `false`
+comes back only when there is no window to set at all — a destroyed chart,
+fewer than two bars loaded, or ends that are not numbers. So a call that raced
+the data load is loud rather than quietly showing some other window.
+
+The chart stops following new bars unless `to` is the newest one. A window
+pinned at the start of a live feed would otherwise be re-targeted by the very
+next candle, which on a 29,000-bar set moves it thousands of bars on the first
+frame.
+
+Zooming *in* never reaches `minSpacing`, so unlike `fitContent()` this
+normally leaves the interactive floor alone. A window **wider** than that
+floor allows still lowers it, for the same reason fitContent does: clamping
+would show a different window from the one you named and still report success.
+
+There is one floor it will not go below, and one case it therefore cannot
+honour exactly: a window needing less than 0.02px per bar — wider than about
+41,600 bars on an 832px plot — is truncated from the left and still returns
+`true`. `fitContent()` on a dataset that size does the same thing, and a
+window that wide has nothing legible in it either way.
+
+> Reading the window back is not the identity of setting it. `visibleRange()`
+> reports every bar with any pixel on screen, so it answers a bar or two wider
+> than the window you set — save what you *set*, not what you read.
+
 ---
 
 ## Interaction
 
 | Input | Action |
 |---|---|
-| Drag in plot | Pan (with inertia on release) |
+| Drag in any pane | Pan, in both axes — time for every pane, price for the pane under the pointer (inertia on release is horizontal only) |
 | Wheel | Zoom, anchored on the cursor |
 | Two-finger pinch | Zoom |
-| Drag price axis | Stretch the price scale |
+| Drag price axis | Stretch the price scale of the pane beside the pointer |
 | Drag time axis | Zoom the time scale |
-| Double-click | Reset: default zoom, price scale back to autoscale, snap to realtime |
+| Double-click in a pane | Reset both: default zoom, every pane's scale back to autoscale, snap to realtime |
+| Double-click an axis | Reset just that one — the price gutter returns its own pane to autoscale, the time axis resets the time scale |
 | `←` / `→` | Pan (hold `Shift` for a bigger step) |
 | `+` / `-` | Zoom |
 
@@ -1034,31 +1075,38 @@ test/                       node --test, no jsdom (not published)
 Honest list of what isn't there yet:
 
 - **No OHLCV legend in the package.** `subscribe('crosshair', fn)` gives you
-  the hovered bar; rendering the readout is still yours to do.
+  the hovered bar and the pane it is in; rendering the readout is still yours
+  to do.
 - **Markers are not draggable.** They are hit-tested for hover and click, but
   there is no drag-to-move or editing interaction.
 - **No indicator maths.** Emberwick draws the line you hand it — see
   [Series](#series) and [Panes](#panes) — but computing SMA/EMA/RSI/MACD is
   yours. Drawing tools (trendlines, Fib) are not implemented.
 - **Panes are not resizable or reorderable.** Heights come from `weight` and
-  are fixed at layout; there is no drag handle between bands.
+  `minHeight` and are fixed at layout; there is no drag handle between bands,
+  and no way to reweight or move a pane short of `removePane()` and adding it
+  again — which drops every series routed to it.
+- **Annotations live on the price pane.** Markers, price lines and zones take
+  a time and a price and draw against the candles; there is no `pane` option
+  that would put a level at RSI 70.
 - **Candlesticks only, as a price type.** No Heikin-Ashi, and no area or
   baseline fills — a series is a stroked line.
 - **No session awareness.** The time axis is indexed by bar, not by clock, so
   weekends and overnight closes collapse to an ordinary bar step — which is
-  usually what you want. What is missing is the other half: nothing marks
-  where one session ends and the next begins, because a day boundary is only
-  labelled at local midnight and intraday sessions rarely open there.
-- **No timezone control.** Axis and crosshair times are formatted in the
-  browser's local zone, with no `timeFormatter` or `timeZone` option. If your
-  timestamps encode exchange-local wall time rather than true epochs, they
-  will render shifted.
+  usually what you want. What is missing is the deliberate half: sessions are
+  never collapsed *on purpose*, and there are no session bounds to fit or snap
+  to. (Session boundaries are at least legible: the first axis label of each
+  new day shows the date, in the configured zone.)
 - **`RandomFeed` deep history is per-page coherent, not one continuous walk** —
-  it regenerates backwards from a seed offset, so paging far left can show a
-  visible seam. Real feeds don't have this artifact.
-- **Types are hand-written**, not generated from source, so they can drift
-  from the implementation.
-- **ESM only.** No CommonJS build; `require()` will not resolve the package.
+  each page re-seeds from its own start time and opens near the feed's `start`
+  price rather than at the neighbouring page's close, so paging far left can
+  show a visible seam. Real feeds don't have this artifact.
+- **Types are hand-written**, not generated from source, and nothing in CI
+  checks them against the implementation — so they can drift.
+- **No `require()`.** The manifest declares an `import` condition and no
+  `require` one, so CommonJS gets `No "exports" main defined`. Use
+  `await import('emberwick')`, or the UMD build — which is a real script-tag
+  bundle, just not an import specifier. See [Installing](#installing).
 
 ---
 
