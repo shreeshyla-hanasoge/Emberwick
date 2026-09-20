@@ -87,6 +87,19 @@ export class Chart {
     if (!container) throw new Error('Chart: container element is required')
 
     this.container = container
+    /**
+     * Vue's ReactiveFlags.SKIP. A plain string constant, no dependency, and
+     * inert everywhere else.
+     *
+     * Without it, storing a Chart on a Vue component's reactive state makes
+     * Vue deep-proxy it the first time anything reads a property — including
+     * `chart.bars`, which on a real dataset is tens of thousands of objects,
+     * on an instance that repaints at 60fps. `markRaw()` is the documented
+     * way to avoid that, but it puts the burden on every consumer and the
+     * failure is a silent performance cliff rather than an error. Declaring
+     * it here means a Chart is never reactive, whoever stores it.
+     */
+    this.__v_skip = true
     this.theme = { ...defaultTheme, ...(options.theme || {}) }
     this.options = {
       volumeRatio: 0.18,

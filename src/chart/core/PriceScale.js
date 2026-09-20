@@ -1,4 +1,5 @@
 import { Smoothed } from '../motion/Tween.js'
+import { toNumber } from './formatters.js'
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v)
 
@@ -40,6 +41,13 @@ export class PriceScale {
     this.height = Math.max(1, height)
   }
 
+  /**
+   * False until fit() has accepted at least one price. While false the bounds
+   * are still their 0..1 constructor defaults, which are not a price range —
+   * renderers use this to decline to draw an axis rather than invent one.
+   */
+  get primed() { return this._primed }
+
   get lo() { return this._inv(this._lo.value) }
   get hi() { return this._inv(this._hi.value) }
 
@@ -73,10 +81,8 @@ export class PriceScale {
    * clamping to 1e-9 turns one zero tick into a ~20-decade range.
    */
   _price(v) {
-    const t = typeof v
-    if (t !== 'number' && t !== 'string') return NaN
-    const n = t === 'number' ? v : v.trim() === '' ? NaN : +v
-    if (!isFinite(n)) return NaN
+    const n = toNumber(v)
+    if (Number.isNaN(n)) return NaN
     return this.mode === 'log' && n <= 0 ? NaN : n
   }
 

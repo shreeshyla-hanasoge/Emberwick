@@ -60,6 +60,22 @@ jobs:
       # the failure mode that ships a 404 to every CDN consumer.
       - run: npm run verify:package
       - run: npm run size
+      # Every module in a consumer's graph is evaluated in Node during an SSR
+      # build (Traed runs vite build --ssr). A module-scope reference to
+      # window or document would break their PRODUCTION build with a stack
+      # trace pointing into node_modules — the library should be the one that
+      # notices. Runs against the built package, not src.
+      - name: Imports with no DOM (SSR safety)
+        run: |
+          cd dist-lib
+          node --input-type=module -e "
+            const core = await import('./index.js')
+            if (typeof core.createChart !== 'function') throw new Error('core entry is broken')
+            const wc = await import('./webcomponent.js')
+            if (typeof wc.register !== 'function') throw new Error('webcomponent entry is broken')
+            console.log('both entries import with no DOM; version', core.version)
+          "
+
       - name: What would be published
         run: npm pack --dry-run ./dist-lib
       - uses: actions/upload-artifact@v7

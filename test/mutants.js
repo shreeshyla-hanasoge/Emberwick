@@ -17,14 +17,17 @@ export const MUTANTS = [
   {
     name: 'PriceScale rejects numeric-string OHLC',
     file: 'src/chart/core/PriceScale.js',
-    find: "    if (t !== 'number' && t !== 'string') return NaN",
-    replace: "    if (t !== 'number') return NaN",
+    // Re-anchored in 0.6.2: the coercion moved into formatters.toNumber, so
+    // this now mutates the delegation rather than the old inline check. Same
+    // defect — the scale refuses strings and the chart renders blank.
+    find: '    const n = toNumber(v)',
+    replace: "    const n = typeof v === 'number' ? v : NaN",
   },
   {
-    name: 'PriceScale accepts null as a price',
-    file: 'src/chart/core/PriceScale.js',
-    find: "    const t = typeof v\n    if (t !== 'number' && t !== 'string') return NaN",
-    replace: '    const t = typeof v\n    if (false) return NaN',
+    name: 'Prices stop rejecting null (null numifies to 0)',
+    file: 'src/chart/core/formatters.js',
+    find: "  if (t !== 'string') return NaN",
+    replace: "  if (t !== 'string') return +v",
   },
   {
     name: 'PriceScale ignores marginBottom',
@@ -246,5 +249,53 @@ export const MUTANTS = [
     file: 'src/adapters/react/dataPlan.js',
     find: '  return extends_ ? { action: \'append\', from: prev.len, next } : { action: \'replace\', next }',
     replace: '  return { action: \'replace\', next }',
+  },
+  {
+    name: 'toNumber rejects numeric strings again',
+    file: 'src/chart/core/formatters.js',
+    find: "  const n = v.trim() === '' ? NaN : +v",
+    replace: '  const n = NaN',
+  },
+  {
+    name: 'toNumber accepts anything numish',
+    file: 'src/chart/core/formatters.js',
+    find: "  const t = typeof v\n  if (t === 'number') return isFinite(v) ? v : NaN\n  if (t !== 'string') return NaN",
+    replace: '  const t = typeof v\n  if (false) return NaN\n  if (false) return NaN',
+  },
+  {
+    name: 'The last-price tag uses the raw close again',
+    file: 'src/chart/render/candles.js',
+    find: '      const label = lastClose.toFixed(decimalsFor(step))',
+    replace: '      const label = lastBar.close.toFixed(decimalsFor(step))',
+  },
+  {
+    name: 'The last-price direction compares raw values',
+    file: 'src/chart/render/candles.js',
+    find: '      const up = Number.isNaN(open) ? true : lastClose >= open',
+    replace: '      const up = lastBar.close >= lastBar.open',
+  },
+  {
+    name: 'The price-line axis label uses the raw price again',
+    file: 'src/chart/render/annotations.js',
+    find: '      const label = price.toFixed(dec)',
+    replace: '      const label = L.price.toFixed(dec)',
+  },
+  {
+    name: 'The price axis is drawn before the scale is primed',
+    file: 'src/chart/render/grid.js',
+    find: '  if (ps.primed) {',
+    replace: '  if (true) {',
+  },
+  {
+    name: 'lineVisible: false is ignored',
+    file: 'src/chart/render/annotations.js',
+    find: '    if (L.lineVisible !== false) {',
+    replace: '    if (true) {',
+  },
+  {
+    name: 'The Chart no longer opts out of Vue reactivity',
+    file: 'src/chart/core/Chart.js',
+    find: '    this.__v_skip = true',
+    replace: '',
   },
 ]

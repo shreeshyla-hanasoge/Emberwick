@@ -109,6 +109,8 @@ export interface PriceLine {
   title?: string
   titleColor?: string
   /** Price tag on the axis. Default true. */
+  /** Draw the horizontal rule. False keeps the title pill and axis tag only. */
+  lineVisible?: boolean
   axisLabel?: boolean
   tagTextColor?: string
 }

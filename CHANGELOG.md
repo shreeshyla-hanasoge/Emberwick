@@ -3,6 +3,52 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] — 2026-09-20
+
+Hardening for real consumer data. Two of these crash the chart outright on
+input that several mainstream sources actually send.
+
+### Fixed
+
+- **Numeric-string prices no longer kill the frame.** `isFinite('100.5')` is
+  true, so a string price passed every guard and reached `.toFixed()` in
+  `render/candles.js` (the last-price tag) and `render/annotations.js` (the
+  price-line axis label), throwing **inside the frame**. Ten consecutive
+  throws and the loop stops, leaving a frozen canvas that needs
+  `chart.resume()`. 0.5.1 taught `PriceScale` to coerce these when fitting the
+  range, which made it worse: the scale fitted correctly and then the renderer
+  died. Coercion now lives in one place, `formatters.toNumber()`, and both the
+  scale and the renderers go through it. Laravel serialises decimal columns as
+  strings; Binance, Bybit and Kraken return OHLC that way.
+- **A close and open compared as strings** decided the last-price tag's
+  colour lexicographically, so `'9'` read as greater than `'100'`.
+- **An empty dataset no longer invents a price axis.** `setData([])` with a
+  marker attached drew axis labels from 0.10 to 0.80 — for an instrument
+  trading at 24,000. This is a normal frame, not an edge case: a backtest in
+  progress returns its trades before its candles. The price grid and its
+  labels now require a scale that has actually fitted a price, mirroring the
+  time axis, which has always declined to draw without bars.
+
+### Added
+
+- **`lineVisible: false` on a price line** keeps the title pill and the axis
+  tag but draws no rule — a labelled level without a line across the chart.
+- **`PriceScale#primed`** — false until the scale has accepted a price.
+- **`formatters.toNumber(v)`** — the single price-coercion path.
+- **`chart.__v_skip = true`.** Vue's `ReactiveFlags.SKIP`: a plain string
+  constant, inert everywhere else, and it stops Vue deep-proxying a Chart that
+  lands in reactive state. Reading `chart.bars` from a component's `data()`
+  would otherwise proxy every bar on an object repainting at 60fps.
+- **An SSR import gate in CI.** The built package is imported under Node with
+  no DOM, so a future module-scope `window` reference breaks Emberwick's CI
+  rather than a consumer's production `vite build --ssr`.
+- 10 tests and 8 mutants. 82 tests, 46/46 mutants caught.
+
+### Docs
+
+- Numeric-string prices, `lineVisible`, and Vue guidance: create the chart in
+  `onMounted`, keep it out of `ref()`, and protect the bar array.
+
 ## [0.6.1] — 2026-09-19
 
 Documentation only. No runtime change; the README ships inside the package,

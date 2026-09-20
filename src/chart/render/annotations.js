@@ -1,4 +1,4 @@
-import { decimalsFor, priceTicks } from '../core/formatters.js'
+import { decimalsFor, priceTicks, toNumber } from '../core/formatters.js'
 import { nearestIndex } from '../overlays/annotations.js'
 
 /**
@@ -93,20 +93,28 @@ export function drawPriceLines(ctx, s) {
   ctx.textBaseline = 'middle'
 
   for (const L of priceLines) {
-    if (!L || !isFinite(L.price)) continue
-    const y = Math.round(ps.y(L.price)) + 0.5
+    if (!L) continue
+    // isFinite('100.5') is true, so the old guard passed a string straight
+    // through to .toFixed() below.
+    const price = toNumber(L.price)
+    if (Number.isNaN(price)) continue
+    const y = Math.round(ps.y(price)) + 0.5
     if (y < 0 || y > plot.h) continue
 
     const color = L.color || theme.textStrong
 
-    ctx.setLineDash(DASH[L.lineStyle] || DASH.dashed)
-    ctx.strokeStyle = color
-    ctx.lineWidth = L.lineWidth || 1
-    ctx.beginPath()
-    ctx.moveTo(0, y)
-    ctx.lineTo(plot.w, y)
-    ctx.stroke()
-    ctx.setLineDash([])
+    // lineVisible: false draws the labels without the rule — an axis tag
+    // pinned to a price, which is a common way to show a current level.
+    if (L.lineVisible !== false) {
+      ctx.setLineDash(DASH[L.lineStyle] || DASH.dashed)
+      ctx.strokeStyle = color
+      ctx.lineWidth = L.lineWidth || 1
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.lineTo(plot.w, y)
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
 
     if (L.title) {
       ctx.textAlign = 'left'
@@ -119,7 +127,7 @@ export function drawPriceLines(ctx, s) {
     }
 
     if (L.axisLabel !== false) {
-      const label = L.price.toFixed(dec)
+      const label = price.toFixed(dec)
       ctx.textAlign = 'left'
       const lw = ctx.measureText(label).width
       ctx.fillStyle = color

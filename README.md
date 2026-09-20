@@ -123,6 +123,12 @@ One contract, used everywhere:
 }
 ```
 
+Prices may be **numbers or numeric strings**. Plenty of real sources send
+strings — Laravel serialises decimal columns that way, as do several exchange
+REST APIs — so they are coerced rather than rejected. Anything else (`null`,
+`undefined`, booleans, objects, `'abc'`) is not a price: it is skipped, and a
+chart with nothing plottable draws no price axis rather than inventing one.
+
 Bars must be **ascending by time** and **de-duplicated**. A bar older than the
 newest one is dropped rather than applied — an out-of-order tick would
 otherwise overwrite the newest candle and leave a duplicate timestamp behind.
@@ -536,6 +542,7 @@ forming candle anchors to the animated values, so it flows with the live bar.
 | `color` | `theme.textStrong` | |
 | `lineStyle` | `'dashed'` | `'solid'`, `'dashed'`, `'dotted'` |
 | `lineWidth` | `1` | |
+| `lineVisible` | `true` | `false` keeps the title pill and axis tag but draws no rule |
 | `title` | — | Pill drawn at the left end |
 | `axisLabel` | `true` | Price tag on the axis |
 
@@ -696,6 +703,16 @@ This is the path for Vue, Svelte, Angular or server-rendered templates without
 a framework-specific wrapper.
 
 ### Vue 3
+
+A chart is created once and driven imperatively — there is no Vue adapter
+because there is nothing for one to do. `createChart()` in `onMounted`,
+`destroy()` in `onBeforeUnmount`, and the instance is the API.
+
+Store it in a plain variable or a `shallowRef`, never a `ref()`. A Chart
+declares Vue's `__v_skip`, so Vue will not deep-proxy it even if it lands in
+reactive state — but the **bar array you pass in** is still yours to protect.
+Deep reactivity over tens of thousands of bars, on an object repainting at
+60fps, is the one performance cliff worth knowing about here.
 
 ```vue
 <script setup>

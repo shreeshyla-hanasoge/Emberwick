@@ -12,6 +12,13 @@ export function drawGrid(ctx, s) {
   ctx.textBaseline = 'middle'
 
   // ---- price grid + labels -------------------------------------------------
+  // Only once the scale has actually fitted a price. Until then the bounds are
+  // the 0..1 constructor defaults, and drawing them labels an instrument
+  // trading at 24,000 with an axis running 0.10 to 0.80. A backtest that is
+  // still running returns its trades before its candles, so an empty dataset
+  // with markers already attached is a normal frame, not an edge case. The
+  // time axis below already declines the same way when there are no bars.
+  if (ps.primed) {
   const rows = Math.max(2, Math.floor(plot.h / 58))
   const { ticks, step } = priceTicks(ps.lo, ps.hi, rows)
   const dec = decimalsFor(step)
@@ -33,6 +40,7 @@ export function drawGrid(ctx, s) {
     const y = Math.round(ps.y(v))
     if (y < plot.y + 6 || y > plot.y + plot.h - 6) continue
     ctx.fillText(v.toFixed(dec), plot.w + 8, y)
+  }
   }
 
   // ---- time grid + labels --------------------------------------------------

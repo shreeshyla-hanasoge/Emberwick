@@ -1,3 +1,21 @@
+/**
+ * Coerce a value to a finite number, or NaN.
+ *
+ * Prices arrive as numeric STRINGS from plenty of real sources: Laravel
+ * serialises decimal columns as strings, and Binance, Bybit and Kraken all
+ * return OHLC that way. PriceScale already coerces them when fitting the
+ * range — so the scale would fit correctly and then a renderer calling
+ * .toFixed() on the raw value would throw inside the frame, which after ten
+ * consecutive failures stops the loop entirely. Both paths go through here.
+ */
+export function toNumber(v) {
+  const t = typeof v
+  if (t === 'number') return isFinite(v) ? v : NaN
+  if (t !== 'string') return NaN
+  const n = v.trim() === '' ? NaN : +v
+  return isFinite(n) ? n : NaN
+}
+
 /** "Nice" step size (1/2/5 x 10^n) covering `span` in about `count` steps. */
 export function niceStep(span, count) {
   const raw = span / Math.max(1, count)

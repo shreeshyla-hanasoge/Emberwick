@@ -1,4 +1,4 @@
-import { decimalsFor, priceTicks } from '../core/formatters.js'
+import { decimalsFor, priceTicks, toNumber } from '../core/formatters.js'
 
 /**
  * Candles + volume. Everything here is culled to the visible index range —
@@ -83,10 +83,15 @@ export function drawCandles(ctx, s) {
 
   // ---- last price line -----------------------------------------------------
   const lastBar = live || bars[bars.length - 1]
-  if (lastBar) {
-    const y = Math.round(ps.y(lastBar.close)) + 0.5
+  // Coerce once: a numeric-string close used to reach .toFixed() below and
+  // throw inside the frame, and a string/string comparison for `up` is
+  // lexicographic ('9' > '100').
+  const lastClose = lastBar ? toNumber(lastBar.close) : NaN
+  if (lastBar && !Number.isNaN(lastClose)) {
+    const y = Math.round(ps.y(lastClose)) + 0.5
     if (y > plot.y && y < plot.y + plot.h) {
-      const up = lastBar.close >= lastBar.open
+      const open = toNumber(lastBar.open)
+      const up = Number.isNaN(open) ? true : lastClose >= open
       ctx.save()
       ctx.setLineDash([3, 3])
       ctx.strokeStyle = up ? theme.up : theme.down
@@ -99,7 +104,7 @@ export function drawCandles(ctx, s) {
       ctx.restore()
 
       const { step } = priceTicks(ps.lo, ps.hi, Math.max(2, Math.floor(plot.h / 58)))
-      const label = lastBar.close.toFixed(decimalsFor(step))
+      const label = lastClose.toFixed(decimalsFor(step))
       ctx.font = theme.font
       ctx.textBaseline = 'middle'
       ctx.textAlign = 'left'
