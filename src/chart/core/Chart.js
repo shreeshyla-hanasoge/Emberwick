@@ -2,7 +2,7 @@ import { createTimeFormatter } from './formatters.js'
 import { Layers } from './Layers.js'
 import { Loop } from './Loop.js'
 import { TimeScale } from './TimeScale.js'
-import { PriceScale } from './PriceScale.js'
+import { Pane, layoutPanes, paneAtY } from './Panes.js'
 import { defaultTheme } from './palette.js'
 import { LiveCandle } from '../motion/LiveCandle.js'
 import { Inertia } from '../motion/Inertia.js'
@@ -177,13 +177,20 @@ export class Chart {
 
     this.layers = new Layers(container, ['base', 'main', 'overlay'])
     this.ts = new TimeScale(options.timeScale)
-    this.ps = new PriceScale(options.priceScale)
+    /**
+     * Horizontal bands of the plot, top to bottom. _panes[0] is the price
+     * pane — where candles, volume and annotations draw — but it is an
+     * ordinary Pane, and the layout arithmetic does not know it is first.
+     */
+    this._panes = [new Pane('price', { weight: 3, priceScale: options.priceScale })]
+    this._paneById = new Map([['price', this._panes[0]]])
+    /** Vertical gap between panes, in CSS px. Unused while there is one. */
+    this._paneGap = isFinite(options.paneGap) && options.paneGap >= 0 ? +options.paneGap : 6
     this.live = new LiveCandle()
     this.live.enabled = this.options.animate !== false
     this.inertia = new Inertia()
 
     this.cursor = null
-    this.plot = { x: 0, y: 0, w: 1, h: 1 }
 
     this.loop = new Loop(
       (dirty, dt) => this._frame(dirty, dt),
@@ -200,13 +207,35 @@ export class Chart {
   }
 
   // ---------------------------------------------------------------- layout --
+  /**
+   * The price pane's scale.
+   *
+   * Superseded by paneScale(id), which names the pane rather than assuming
+   * there is only one. Kept because it is public, typed, and what consumers
+   * reach for to position host overlays.
+   */
+  get ps() {
+    return this._panes[0].ps
+  }
+
+  /**
+   * The price pane's rect. Superseded by paneRect(id).
+   *
+   * Live rather than a copy: the same object survives a resize, where this
+   * used to be replaced with a fresh one on every layout.
+   */
+  get plot() {
+    return this._panes[0].rect
+  }
+
   _layout() {
     const { width, height } = this.layers
     const w = Math.max(1, width - this.theme.priceAxisWidth)
     const h = Math.max(1, height - this.theme.timeAxisHeight)
-    this.plot = { x: 0, y: 0, w, h }
     this.ts.resize(w)
-    this.ps.layout(0, h)
+    // One pane takes the whole band with no gap, which is exactly the single
+    // rect this used to build by hand.
+    layoutPanes(this._panes, w, h, this._panes.length > 1 ? this._paneGap : 0)
   }
 
   // ------------------------------------------------------------------ data --
