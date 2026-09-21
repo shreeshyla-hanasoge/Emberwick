@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createChart, RandomFeed, defaultTheme, version } from '../chart/index.js'
+import BrandLogo from '../components/BrandLogo.jsx'
 
 const NPM_URL = 'https://www.npmjs.com/package/emberwick'
 const CDN_URL = 'https://unpkg.com/emberwick/umd/emberwick.umd.js'
@@ -832,7 +833,7 @@ const FEATURES = [
   },
   {
     t: 'Yours to theme',
-    d: 'A flat 20-key theme object — colours, fonts, axis sizing — swappable at runtime. Dark and light presets included, plus toImage() for a PNG snapshot.',
+    d: 'A flat 21-key theme object — colours, fonts, axis sizing and watermark tone — swappable at runtime. Dark and light presets included, plus toImage() for a branded PNG snapshot.',
   },
   {
     t: 'Range-aware',
@@ -979,8 +980,7 @@ export default function Landing() {
       {/* ---- nav ---- */}
       <header className="lp-nav">
         <a className="lp-brand" href="#/">
-          <span className="lp-mark" />
-          <span className="lp-brandname">Emberwick</span>
+          <BrandLogo className="lp-brandlogo" />
           <span className="lp-ver">v{version}</span>
         </a>
         <nav className="lp-navlinks">

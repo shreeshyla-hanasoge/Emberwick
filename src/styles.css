@@ -53,14 +53,12 @@ body.lock { overflow: hidden; }
 .logo-link { display: block; line-height: 0; }
 
 .logo {
-  width: 30px; height: 30px; border-radius: 8px;
-  background: linear-gradient(140deg, var(--accent), #1e7a70);
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
+  width: 142px; height: auto;
   flex-shrink: 0;
   display: block;
+  fill: var(--text);
 }
 
-.brand h1 { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
 .brand p { font-size: 11px; color: var(--muted); margin-top: 1px; }
 
 .controls { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -250,13 +248,7 @@ body.lock { overflow: hidden; }
   text-decoration: none; color: var(--text);
 }
 
-.lp-mark {
-  width: 26px; height: 26px; border-radius: 7px;
-  background: linear-gradient(140deg, var(--accent), #17655d);
-  box-shadow: 0 0 22px rgba(38,166,154,0.35);
-}
-
-.lp-brandname { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+.lp-brandlogo { width: 132px; height: auto; fill: var(--text); }
 
 .lp-ver {
   font-size: 10px; font-weight: 600;

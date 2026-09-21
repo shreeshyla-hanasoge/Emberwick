@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { createChart, RandomFeed, defaultTheme, lightTheme } from '../chart/index.js'
+import BrandLogo from '../components/BrandLogo.jsx'
 
 const fmt = (v, d = 2) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '—')
 
@@ -198,10 +199,9 @@ export default function Playground() {
       <header className="bar">
         <div className="brand">
           <a className="logo-link" href="#/" aria-label="Back to Emberwick home">
-            <span className="logo" />
+            <BrandLogo className="logo" />
           </a>
           <div>
-            <h1>Emberwick</h1>
             <p>smooth flowing candles · pluggable feeds</p>
           </div>
         </div>

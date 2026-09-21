@@ -19,6 +19,7 @@ import {
   seriesExtent,
 } from '../overlays/series.js'
 import { drawSeries } from '../render/series.js'
+import { drawWatermark } from '../render/watermark.js'
 
 /** The 'replay' payload when nothing is being replayed. */
 const inactiveReplay = () => ({
@@ -55,6 +56,7 @@ function paneInfo(pane, seriesIds) {
     series: seriesIds,
   }
 }
+
 
 /** Consecutive gaps sampled when inferring the timeframe. */
 const TF_SAMPLES = 200
@@ -1285,6 +1287,7 @@ export class Chart {
       priceLines: this.priceLines,
       zones: this.zones,
       series: visibleSeries,
+      watermark: this.options.watermark,
       fmt: this.fmt,
       /** Bottom of the LAST pane — where the shared time axis belongs. */
       plotBottom: this._panes[this._panes.length - 1].rect.y + this._panes[this._panes.length - 1].rect.h,
@@ -1312,6 +1315,7 @@ export class Chart {
 
     if (redrawAll) {
       drawGrid(this.layers.ctx.base, state)
+      drawWatermark(this.layers.ctx.base, state)
       // Sub-panes draw their own horizontal grid and price labels. drawGrid
       // has already cleared and painted the background for the whole canvas —
       // exactly one renderer clears each layer, which is what lets this be an
@@ -1555,4 +1559,3 @@ export class Chart {
     this.bars = []
   }
 }
-

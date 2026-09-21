@@ -34,6 +34,8 @@ export interface Theme {
   volumeUp: string
   volumeDown: string
   crosshair: string
+  /** Low-contrast fill for the Emberwick chart signature. */
+  watermark: string
   labelBg: string
   labelText: string
   tagText: string
@@ -251,6 +253,8 @@ export interface ChartOptions {
   magnet?: boolean
   /** Master switch for tick/candle animation. Default true. */
   animate?: boolean
+  /** Draw the Emberwick wordmark behind chart data. Default true. */
+  watermark?: boolean
   /** Bars requested from the feed on setFeed(). Default 1500. */
   initialBars?: number
   /** Initial markers; equivalent to calling setMarkers() after construction. */
