@@ -8,14 +8,15 @@ export function drawWatermark(ctx, s) {
   if (!paths) paths = BRAND_PATHS.map((d) => new Path2D(d))
 
   const [, , sourceW, sourceH] = BRAND_VIEWBOX
-  // A small bottom-left signature reads as product attribution. Keeping it
-  // out of the visual centre also leaves the price action as the clear focus.
+  // A small top-left signature reads as product attribution. The bottom of a
+  // financial chart is normally occupied by volume, where a subtle mark gets
+  // visually swallowed; this corner keeps it consistently legible.
   const markW = Math.min(180, s.plot.w * 0.24)
   const scale = markW / sourceW
   const h = sourceH * scale
   const inset = Math.min(16, s.plot.w * 0.04)
   const x = s.plot.x + inset
-  const y = s.plot.y + s.plot.h - h - inset
+  const y = s.plot.y + inset
 
   ctx.save()
   ctx.translate(x, y)

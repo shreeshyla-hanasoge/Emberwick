@@ -11,7 +11,7 @@ export const defaultTheme = {
   volumeUp: 'rgba(38,166,154,0.30)',
   volumeDown: 'rgba(239,83,80,0.30)',
   crosshair: 'rgba(255,255,255,0.32)',
-  watermark: 'rgba(255,255,255,0.085)',
+  watermark: 'rgba(255,255,255,0.16)',
   labelBg: '#2a3040',
   labelText: '#e6e9ef',
   tagText: '#06080d',
@@ -31,6 +31,6 @@ export const lightTheme = {
   volumeUp: 'rgba(38,166,154,0.25)',
   volumeDown: 'rgba(239,83,80,0.25)',
   crosshair: 'rgba(0,0,0,0.35)',
-  watermark: 'rgba(17,24,39,0.07)',
+  watermark: 'rgba(17,24,39,0.11)',
   tagText: '#ffffff',
 }
