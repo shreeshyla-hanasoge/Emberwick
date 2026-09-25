@@ -3,7 +3,10 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.11.0] — 2026-09-25
+
+**The crosshair works on a phone.** Tap a bar to read it, long-press to scrub
+along it, and it stays put when your finger lifts.
 
 ### Fixed
 
