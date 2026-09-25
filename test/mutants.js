@@ -406,6 +406,42 @@ export const MUTANTS = [
     replace: "    this.loop.invalidate('all')\n    return true",
   },
   {
+    name: 'A touch crosshair dies on the pointerleave that follows every lift',
+    file: 'src/chart/core/Chart.js',
+    find: '      if (this._stickyCursor) return\n      this.cursor = null',
+    replace: '      this.cursor = null',
+  },
+  {
+    name: 'A tap places no crosshair',
+    file: 'src/chart/core/Chart.js',
+    find: "      if (touchMode === 'pending') placeCrosshair({ x: downX, y: downY })",
+    replace: '',
+  },
+  {
+    name: 'A scrub pans the chart under its own crosshair',
+    file: 'src/chart/core/Chart.js',
+    find: "      if (touchMode === 'scrub') {",
+    replace: '      if (false) {',
+  },
+  {
+    name: 'Finger drift is a pan, because the slop is zero',
+    file: 'src/chart/core/Chart.js',
+    find: '    const TOUCH_SLOP = 10',
+    replace: '    const TOUCH_SLOP = 0',
+  },
+  {
+    name: 'A mouse is put through the touch gesture model',
+    file: 'src/chart/core/Chart.js',
+    find: "      if (e.pointerType === 'touch' && this.options.touchCrosshair !== false && mode === 'pan') {",
+    replace: '      if (this.options.touchCrosshair !== false && mode === \'pan\') {',
+  },
+  {
+    name: 'The committing move pans by the slop distance, jumping the chart',
+    file: 'src/chart/core/Chart.js',
+    find: '        lastX = p.x\n        lastY = p.y\n        lastT = performance.now()\n        return\n      }\n      if (touchMode !== \'pan\') {',
+    replace: '        return\n      }\n      if (touchMode !== \'pan\') {',
+  },
+  {
     name: 'The time zone option is ignored',
     file: 'src/chart/core/Chart.js',
     find: '    this.fmt = createTimeFormatter(options.timeZone)',

@@ -223,6 +223,8 @@ const chart = createChart(el, {
   volumeRatio: 0.18,     // fraction of height for the volume strip
   magnet: true,          // crosshair snaps to nearest OHLC
   animate: true,         // live-candle easing
+  touchCrosshair: true,  // tap to place, long-press to scrub (see Touch)
+  touchCrosshairDelay: 350,  // ms a finger rests before a drag scrubs
   initialBars: 1500,     // first getBars() page size
   timeScale: { spacing: 9, minSpacing: 0.8, maxSpacing: 160, rightOffset: 12 },
   priceScale: { mode: 'linear', tau: 120, marginTop: 0.12, marginBottom: 0.12 },
@@ -266,6 +268,7 @@ const chart = createChart(el, {
 | `fitContent()` | Zoom and scroll so the whole dataset is on screen. Not animated |
 | `setVisibleRange({ from, to })` | Open on a window of it instead — inclusive bar indices. Not animated |
 | `setTimeZone(zone)` | Format every rendered timestamp in an IANA zone, or `null` for local |
+| `hideCrosshair()` | Dismiss a crosshair a tap or long-press left standing. No-op on mouse |
 | `resize()` | Re-measure the container now. Resizes and pixel-ratio changes are automatic |
 | `resume()` | Restart the render loop after it gave up. See below |
 | `destroy()` | Remove listeners, stop the loop, drop canvases |
@@ -798,6 +801,37 @@ window that wide has nothing legible in it either way.
 
 The container gets `tabindex="0"` if it has none, so keyboard nav works
 without extra markup.
+
+### Touch
+
+A finger cannot hover. On a mouse the crosshair tracks a pointer that is
+merely *over* the chart and panning needs a button held, so the two gestures
+never collide; on touch the only way to move the pointer at all is to be
+touching, which is also the pan gesture. Emberwick separates them in time
+instead:
+
+| Gesture | Action |
+|---|---|
+| Tap | Place the crosshair there. It stays after the finger lifts |
+| Long-press, then drag | Scrub — the crosshair follows the finger and the chart does not pan |
+| Drag straight away | Pan, exactly as a mouse drag does. The crosshair is hidden for the gesture |
+| Two-finger pinch | Zoom, and dismiss the crosshair |
+
+A crosshair placed by tap or long-press is *sticky*: it outlives the gesture,
+because a reader who taps a bar wants to read it after lifting their finger.
+Dismiss it with a pan, a pinch, or `chart.hideCrosshair()`.
+
+```js
+createChart(el, {
+  touchCrosshair: true,      // default. false restores one-finger pan-and-track
+  touchCrosshairDelay: 350,  // ms a finger must rest before a drag scrubs
+})
+```
+
+Movement under 10px is treated as a tap rather than a pan, since a resting
+finger drifts. A long press on the price or time gutter is still an axis
+drag — the crosshair has nothing to say out there. Stylus input hovers, so
+`pointerType: 'pen'` follows the mouse path, not this one.
 
 ---
 
