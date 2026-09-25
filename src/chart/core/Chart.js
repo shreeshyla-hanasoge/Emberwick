@@ -137,6 +137,16 @@ export class Chart {
       volumeRatio: 0.18,
       magnet: true,
       animate: true,
+      /**
+       * Touch gets tap-to-place and long-press-to-scrub instead of the
+       * mouse's hover-to-track. A finger cannot hover: the only way it can
+       * produce a pointermove is to be touching, which is also the pan
+       * gesture, so the two have to be separated in TIME rather than by
+       * whether a button is held. See _bindEvents.
+       */
+      touchCrosshair: true,
+      /** How long a finger must rest before a drag scrubs instead of pans. */
+      touchCrosshairDelay: 350,
       ...options,
     }
 
@@ -210,6 +220,14 @@ export class Chart {
     this.inertia = new Inertia()
 
     this.cursor = null
+    /**
+     * A touch crosshair outlives the gesture that placed it. `cursor` alone
+     * cannot express that: pointerleave fires right after pointerup on touch
+     * (the pointer ceases to exist), and clearing there would destroy the
+     * crosshair at the exact moment the reader lifted to look at it.
+     */
+    this._stickyCursor = false
+    this._holdTimer = null
 
     this.loop = new Loop(
       (dirty, dt) => this._frame(dirty, dt),
@@ -594,6 +612,54 @@ export class Chart {
     const pointers = new Map()
     let pinchDist = 0
 
+    /**
+     * Touch gesture state.
+     *
+     * 'pending' -- a finger is down inside the plot and the gesture has not
+     *              committed yet. It becomes 'pan' the moment it moves past
+     *              TOUCH_SLOP, or 'scrub' when the hold timer fires first.
+     * 'scrub'   -- the crosshair follows the finger and panning is OFF for
+     *              the rest of this gesture.
+     * 'pan'     -- as the mouse behaves, with the crosshair suppressed.
+     *
+     * null for mouse and pen, which hover and therefore keep the original
+     * model untouched.
+     */
+    let touchMode = null
+    let downX = 0
+    let downY = 0
+
+    /**
+     * Movement below this is a tap, not a drag. Fingers are imprecise and a
+     * "still" finger drifts a few pixels; anything under ~10px would be an
+     * accidental pan the reader did not ask for.
+     */
+    const TOUCH_SLOP = 10
+
+    const clearHold = () => {
+      if (this._holdTimer !== null) {
+        clearTimeout(this._holdTimer)
+        this._holdTimer = null
+      }
+    }
+
+    /** Put the crosshair at p and keep it there until something dismisses it. */
+    const placeCrosshair = (p) => {
+      this.cursor = p
+      this._stickyCursor = true
+      this._emitCrosshair(p)
+      this.loop.invalidate('overlay')
+    }
+
+    const dismissCrosshair = () => {
+      if (!this.cursor && !this._stickyCursor) return
+      this.cursor = null
+      this._stickyCursor = false
+      this._emitCrosshair(null)
+      this.loop.invalidate('overlay')
+    }
+    this._dismissCrosshair = dismissCrosshair
+
     const localPos = (e) => {
       const r = el.getBoundingClientRect()
       return { x: e.clientX - r.left, y: e.clientY - r.top }
@@ -605,6 +671,12 @@ export class Chart {
         const [a, b] = [...pointers.values()]
         pinchDist = Math.hypot(a.x - b.x, a.y - b.y)
         dragging = false
+        // A second finger means zoom, which is a statement about the view
+        // rather than about one bar. Drop any crosshair the first finger
+        // placed, and the hold it may still be counting down.
+        clearHold()
+        touchMode = null
+        dismissCrosshair()
         return
       }
       const p = localPos(e)
@@ -620,6 +692,32 @@ export class Chart {
       lastT = performance.now()
       this.inertia.stop()
       el.setPointerCapture(e.pointerId)
+
+      /**
+       * A finger inside the plot does not commit to anything yet. Which
+       * gesture this is gets decided by what happens next: moving past the
+       * slop makes it a pan, resting past the delay makes it a scrub, and
+       * lifting before either makes it a tap.
+       *
+       * Only 'pan' targets qualify. A long press on the price or time gutter
+       * is still an axis drag -- the crosshair has nothing to say there.
+       */
+      clearHold()
+      if (e.pointerType === 'touch' && this.options.touchCrosshair !== false && mode === 'pan') {
+        touchMode = 'pending'
+        downX = p.x
+        downY = p.y
+        this._holdTimer = setTimeout(() => {
+          this._holdTimer = null
+          if (touchMode !== 'pending') return
+          touchMode = 'scrub'
+          // The finger has not moved, so the crosshair belongs where it went
+          // down -- not at some later position this callback cannot see.
+          placeCrosshair({ x: downX, y: downY })
+        }, Math.max(0, +this.options.touchCrosshairDelay || 0))
+      } else {
+        touchMode = null
+      }
     }
 
     this._onMove = (e) => {
@@ -638,9 +736,38 @@ export class Chart {
         return
       }
 
-      this.cursor = p
-      this._emitCrosshair(p)
-      this.loop.invalidate('overlay')
+      /**
+       * Touch decides what the gesture is here, and the branches are
+       * mutually exclusive on purpose: the mouse can pan and track at once
+       * because hovering costs nothing, but a finger doing both is what made
+       * the crosshair look pinned to the finger while the bars slid away
+       * underneath it.
+       */
+      if (touchMode === 'scrub') {
+        placeCrosshair(p)
+        lastX = p.x
+        lastY = p.y
+        lastT = performance.now()
+        return
+      }
+      if (touchMode === 'pending') {
+        if (Math.abs(p.x - downX) < TOUCH_SLOP && Math.abs(p.y - downY) < TOUCH_SLOP) return
+        // Committed to a pan before the hold elapsed.
+        clearHold()
+        touchMode = 'pan'
+        dismissCrosshair()
+        // Pan from where the finger IS, not from where it went down, or the
+        // chart jumps by the slop distance on the first committed move.
+        lastX = p.x
+        lastY = p.y
+        lastT = performance.now()
+        return
+      }
+      if (touchMode !== 'pan') {
+        this.cursor = p
+        this._emitCrosshair(p)
+        this.loop.invalidate('overlay')
+      }
 
       if (!dragging) return
       const now = performance.now()
@@ -685,6 +812,11 @@ export class Chart {
      * unchanged, so -panDy is its exact inverse.
      */
     this._onCancel = (e) => {
+      // The page is taking the gesture. Whatever the finger was saying, it
+      // was not saying it to the chart.
+      clearHold()
+      touchMode = null
+      dismissCrosshair()
       if (dragPane && panDy) {
         dragPane.ps.panBy(-panDy)
         if (paneWasAuto) dragPane.ps.resetAuto()
@@ -697,7 +829,19 @@ export class Chart {
     this._onUp = (e) => {
       pointers.delete(e.pointerId)
       if (pointers.size < 2) pinchDist = 0
-      if (dragging && mode === 'pan' && moved) {
+      clearHold()
+      /**
+       * A tap: down and up inside the slop, before the hold elapsed. That is
+       * the gesture a reader makes to ask "what is this bar", and it is the
+       * one that did nothing at all before -- cursor was only ever assigned
+       * on move, so a tap that never moved never drew anything.
+       */
+      if (touchMode === 'pending') placeCrosshair({ x: downX, y: downY })
+      // A scrub ends with its crosshair left standing. Nothing to release:
+      // a scrub never fed the inertia sampler, so there is no flick to coast.
+      const wasScrub = touchMode === 'scrub'
+      touchMode = null
+      if (dragging && mode === 'pan' && moved && !wasScrub) {
         this.inertia.release()
         this.loop.invalidate('all')
       }
@@ -709,6 +853,14 @@ export class Chart {
     }
 
     this._onLeave = () => {
+      /**
+       * Touch fires pointerleave immediately after pointerup, because the
+       * pointer stops existing when the finger lifts. Clearing here would
+       * erase a crosshair the reader placed deliberately, in the same frame
+       * they placed it. A mouse leaving the element genuinely has stopped
+       * pointing at anything, so that still clears.
+       */
+      if (this._stickyCursor) return
       this.cursor = null
       this._emitCrosshair(null)
       this.loop.invalidate('overlay')
@@ -1512,6 +1664,18 @@ export class Chart {
    * the chart hands back — the crosshair payload, visibleRange, marker times
    * — is still in those terms.
    */
+  /**
+   * Dismiss a crosshair a tap or long-press left standing.
+   *
+   * Only touch leaves one behind; on mouse the crosshair already follows the
+   * pointer and clears when it leaves, so this is a no-op there. Emits a
+   * null crosshair event, so a consumer's OHLC readout empties with it.
+   */
+  hideCrosshair() {
+    if (this._dismissCrosshair) this._dismissCrosshair()
+    return this
+  }
+
   setTimeZone(zone) {
     this.fmt = createTimeFormatter(zone || null)
     this.loop.invalidate('all')
@@ -1532,6 +1696,13 @@ export class Chart {
     // and both framework adapters can unmount twice (React StrictMode).
     if (this._destroyed) return
     this._destroyed = true
+    // A hold counting down past destroy() would fire into a dead chart and
+    // invalidate a stopped loop. Inert, but it keeps a timer and this whole
+    // object alive until it elapses.
+    if (this._holdTimer !== null) {
+      clearTimeout(this._holdTimer)
+      this._holdTimer = null
+    }
     const el = this.container
     el.removeEventListener('pointerdown', this._onDown)
     el.removeEventListener('pointermove', this._onMove)

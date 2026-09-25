@@ -3,6 +3,52 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The crosshair is usable on a phone.** Tap a bar to place it, long-press and
+  drag to scrub along it, and it stays put when your finger lifts.
+
+  The input layer treated a finger exactly like a mouse, and the mouse model
+  does not survive the translation. `cursor` was only ever assigned in
+  `_onMove`, so a tap that never moved drew nothing at all. `_onDown` set
+  `dragging = true` unconditionally, so the one movement a finger *can* make
+  drove the crosshair and `panBy` at the same time — the crosshair tracked
+  correctly, but across bars that were sliding out from under it, which reads
+  as a crosshair welded to your fingertip. And `pointerleave` fires right after
+  `pointerup` on touch, because the pointer stops existing when the finger
+  lifts, so the crosshair was destroyed at the exact moment it became worth
+  reading.
+
+  A mouse can hover, and hovering costs nothing, so tracking and panning can
+  share one gesture. A finger cannot hover: touching *is* the gesture. So the
+  two are separated in time instead — tap places, long-press scrubs, an
+  immediate drag pans:
+
+  ```js
+  createChart(el, {
+    touchCrosshair: true,      // default
+    touchCrosshairDelay: 350,  // ms a finger rests before a drag scrubs
+  })
+  ```
+
+  Movement under 10px is a tap, not a pan, because a resting finger drifts.
+  The distance travelled before a pan commits is discarded rather than
+  applied, or the chart would jump by the slop the instant it decided. A
+  scrub never feeds the inertia sampler, so letting go of one does not fling
+  the view. A second finger, a pan, a cancelled gesture, or the new
+  `chart.hideCrosshair()` all dismiss a sticky crosshair.
+
+  Mouse and pen behaviour is unchanged — pen hovers, so it stays on the mouse
+  path. `touchCrosshair: false` restores the old one-finger behaviour.
+
+### Added
+
+- **`chart.hideCrosshair()`** — dismiss a crosshair a tap or long-press left
+  standing, emitting a null `'crosshair'` event so a readout empties with it.
+  A no-op on mouse.
+
 ## [0.10.0] — 2026-09-21
 
 **The view is yours to set.** A window you choose, a drag that lands where you

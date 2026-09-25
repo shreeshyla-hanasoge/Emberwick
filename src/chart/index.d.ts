@@ -251,6 +251,17 @@ export interface ChartOptions {
   volumeRatio?: number
   /** Crosshair snaps to the nearest OHLC value. Default true. */
   magnet?: boolean
+  /**
+   * Touch gets tap-to-place and long-press-to-scrub instead of the mouse's
+   * hover-to-track, since a finger cannot hover. Default true. Set false for
+   * the pre-0.11 behaviour, where one finger panned and tracked at once.
+   */
+  touchCrosshair?: boolean
+  /**
+   * How long a finger must rest, in ms, before a drag scrubs the crosshair
+   * instead of panning. Default 350.
+   */
+  touchCrosshairDelay?: number
   /** Master switch for tick/candle animation. Default true. */
   animate?: boolean
   /** Draw the Emberwick wordmark behind chart data. Default true. */
@@ -632,6 +643,11 @@ export declare class Chart {
    * times, the crosshair payload and visibleRange stay in the ms epochs you
    * supplied.
    */
+  /**
+   * Dismiss a crosshair a tap or long-press left standing. No-op on mouse,
+   * where the crosshair follows the pointer and clears when it leaves.
+   */
+  hideCrosshair(): this
   setTimeZone(zone: string | null): this
   /**
    * Re-measure the container and canvases now. Resizes and devicePixelRatio
