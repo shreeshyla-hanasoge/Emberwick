@@ -1,0 +1,61 @@
+name: Feature request
+description: Suggest a capability the chart is missing
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Emberwick keeps a deliberately small core with zero runtime dependencies.
+        The most useful requests explain the charting problem, not just the API
+        you imagined for it — often there is a smaller change that solves it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The real task, and where the chart gets in the way today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What are you doing instead right now?
+      description: >
+        The workaround, however ugly. Knowing what people reach for tells us
+        what the right API is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to see?
+      description: A sketch of the API is welcome but not required.
+      render: js
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Rendering / series
+        - Interaction (zoom, pan, crosshair)
+        - Data feed / realtime
+        - Overlays, markers, price lines
+        - Panes and layout
+        - Typings / packaging
+        - Framework adapter
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and the changelog.
+          required: true
+        - label: I understand the core must stay dependency-free and SSR-safe.
+          required: true

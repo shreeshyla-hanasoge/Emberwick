@@ -1,0 +1,83 @@
+name: Bug report
+description: Something in the chart behaves differently than documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. A reproduction — the bars, the options, and the calls
+        in order — gets this fixed far faster than a description does.
+
+        **Security issues do not go here.** See [SECURITY.md](../blob/master/SECURITY.md).
+
+  - type: input
+    id: version
+    attributes:
+      label: Emberwick version
+      description: From `package.json`, or the `version` export.
+      placeholder: "0.10.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: entry
+    attributes:
+      label: How are you loading it?
+      options:
+        - ESM (`import { createChart } from 'emberwick'`)
+        - UMD via `<script>` / CDN
+        - Web component entry
+        - Vendored source
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happens
+    attributes:
+      label: What happens
+      description: What you see, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        The smallest code that shows it — data in, options, and the calls in the
+        order you make them. A link to a StackBlitz or a gist is welcome.
+      render: js
+      placeholder: |
+        const chart = createChart(el, { /* options */ })
+        chart.setData(bars)
+        chart.setVisibleRange({ from: 0, to: 99 })
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser and version, OS, framework and build tool if relevant.
+      placeholder: |
+        Chrome 141, macOS 15
+        React 18 + Vite 5
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Any errors or warnings, verbatim.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked this against the latest release.
+          required: true
+        - label: I searched existing issues.
+          required: true
