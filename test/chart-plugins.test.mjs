@@ -1,0 +1,98 @@
+/**
+ * The core plugin seam, and the frame fixes it depends on.
+ *
+ * Everything here drives the real handlers (chart._onDown & co.) and real
+ * frames through dom-stub, and asserts on what reached each canvas — the
+ * recording context has no state stack, so isolation is proven by op order.
+ */
+import { test, before, after } from 'node:test'
+import assert from 'node:assert/strict'
+import { installDom, makeContainer, makeBars, frame, settle, clearOps } from './dom-stub.mjs'
+
+let restoreDom
+before(() => { restoreDom = installDom() })
+after(() => restoreDom())
+
+const { createChart, Smoothed } = await import('../src/chart/index.js')
+
+const T0 = 1_700_000_000_000
+const MIN = 60_000
+
+// ------------------------------------------------------------ settle frame
+
+/** x of every vertical stroke (a wick: moveTo(x, a) then lineTo(x, b)) in `ops`. */
+const wickXs = (ops) => {
+  const xs = []
+  for (let i = 0; i + 1 < ops.length; i++) {
+    const a = ops[i]
+    const b = ops[i + 1]
+    if (a.op === 'moveTo' && b.op === 'lineTo' && a.args[0] === b.args[0] && a.args[1] !== b.args[1]) xs.push(a.args[0])
+  }
+  return xs
+}
+
+/** candles.js' own wick formula, from the scale as it is NOW. */
+const wickX = (chart, i) => Math.round(chart.ts.x(i)) + (chart.ts.barWidth() % 2 ? 0.5 : 0)
+
+/**
+ * Run frames the way the Loop would with nothing else invalidating — an empty
+ * dirty set — until the chart stops asking for more. Returns the main-layer
+ * ops of the last frame that painted main.
+ */
+const runOut = (chart) => {
+  let lastMain = null
+  for (let i = 0; i < 600; i++) {
+    clearOps(chart)
+    const more = frame(chart, 16, [])
+    if (chart.layers.canvas.main.ops.length) lastMain = chart.layers.canvas.main.ops.slice()
+    if (!more) return lastMain
+  }
+  throw new Error('never settled')
+}
+
+test('a settling ease redraws the candles at the value it snapped to', () => {
+  // Smoothed's epsilon is relative, and _right is an absolute bar index: on a
+  // 29,000-bar backtest it snaps the last 0.03 bars, about 4px at this zoom.
+  // If that snap is not a redrawn frame, the candles stay 4px off from
+  // everything later painted through the scale.
+  const n = 29_000
+  const chart = createChart(makeContainer())
+  chart.setData(makeBars(T0, n, MIN, 100))
+  settle(chart)
+  chart.setVisibleRange({ from: n - 6, to: n - 1 })   // ~138px per bar
+  frame(chart)
+  chart.ts._right.set(n - 3)                          // an eased move of two bars
+
+  const lastMain = runOut(chart)
+  assert.equal(chart.ts._right.value, chart.ts._right.target, 'the ease has settled')
+  const xs = wickXs(lastMain)
+  for (const i of [n - 7, n - 5, n - 3]) {
+    assert.ok(xs.includes(wickX(chart, i)),
+      `bar ${i}: candles drawn at ${xs.join(', ')}, the scale now puts it at ${wickX(chart, i)}`)
+  }
+})
+
+test('Smoothed reports its settle snap as motion exactly once', () => {
+  const s = new Smoothed(0, 65)
+  s.set(1000)
+  let frames = 0
+  while (s.tick(16)) frames++
+  assert.equal(s.value, 1000)
+  assert.equal(s.tick(16), false, 'once snapped, it is still')
+  assert.ok(frames > 1)
+
+  const still = new Smoothed(5, 65)
+  assert.equal(still.tick(16), false, 'a value already at its target reports nothing')
+})
+
+test('a NaN target still settles, in one reported frame', () => {
+  // Smoothed's own epsilon never calls NaN settled; a subclass with an
+  // absolute one (the drawings' Eased) does, and must then go quiet.
+  class Absolute extends Smoothed {
+    get settled() { return !(Math.abs(this.target - this.value) > 1e-3) }
+  }
+  const s = new Absolute(0, 60)
+  s.set(NaN)
+  assert.equal(s.tick(16), true, 'the snap to NaN is a change')
+  assert.equal(s.tick(16), false, 'and then it is settled: NaN is NaN')
+})

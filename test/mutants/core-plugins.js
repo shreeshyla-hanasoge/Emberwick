@@ -49,4 +49,17 @@ export const MUTANTS = [
     find: '    this._last = performance.now()\n    this._woke = false\n',
     replace: '    this._last = performance.now()\n',
   },
+  // --------------------------------------------------------- settle frame --
+  {
+    name: 'The settle frame is not redrawn, so drawings drift from their candles',
+    file: 'src/chart/motion/Tween.js',
+    find: '      return moved',
+    replace: '      return false',
+  },
+  {
+    name: 'A NaN target never stops reporting motion',
+    file: 'src/chart/motion/Tween.js',
+    find: '      const moved = !Object.is(this.value, this.target)',
+    replace: '      const moved = this.value !== this.target',
+  },
 ]

@@ -35,8 +35,13 @@ export class Smoothed {
   /** @returns {boolean} true while still moving (caller keeps the loop alive) */
   tick(dt) {
     if (this.settled) {
+      // The snap to target is itself a visible change. Reporting it as motion
+      // buys exactly one more full frame per ease, so the candles are drawn
+      // with the value everything else will now project through. Object.is,
+      // not !==: a NaN target must still settle (NaN !== NaN forever).
+      const moved = !Object.is(this.value, this.target)
       this.value = this.target
-      return false
+      return moved
     }
     this.value += (this.target - this.value) * (1 - Math.exp(-dt / this.tau))
     return true
