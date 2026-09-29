@@ -1587,6 +1587,10 @@ export class Chart {
   }
 
   setAnimate(on) {
+    // Recorded, not only forwarded: LiveCandle was the one thing that heard
+    // setAnimate(false), and anything else reading options.animate — a plugin
+    // deciding whether to animate — went on seeing the constructor's value.
+    this.options.animate = !!on
     this.live.enabled = !!on
     this.loop.invalidate('all')
   }

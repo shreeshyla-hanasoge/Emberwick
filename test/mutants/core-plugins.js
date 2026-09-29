@@ -62,4 +62,11 @@ export const MUTANTS = [
     find: '      const moved = !Object.is(this.value, this.target)',
     replace: '      const moved = this.value !== this.target',
   },
+  // ----------------------------------------------------------- setAnimate --
+  {
+    name: 'setAnimate(false) never reaches plugins',
+    file: 'src/chart/core/Chart.js',
+    find: '    this.options.animate = !!on',
+    replace: '',
+  },
 ]

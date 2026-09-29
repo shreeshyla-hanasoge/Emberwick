@@ -96,3 +96,15 @@ test('a NaN target still settles, in one reported frame', () => {
   assert.equal(s.tick(16), true, 'the snap to NaN is a change')
   assert.equal(s.tick(16), false, 'and then it is settled: NaN is NaN')
 })
+
+// ----------------------------------------------------------------- options
+
+test('setAnimate records the choice in options.animate', () => {
+  const chart = createChart(makeContainer())
+  assert.equal(chart.options.animate, true)
+  chart.setAnimate(false)
+  assert.equal(chart.options.animate, false, 'readable by anything that animates, not only LiveCandle')
+  assert.equal(chart.live.enabled, false)
+  chart.setAnimate(true)
+  assert.equal(chart.options.animate, true)
+})
