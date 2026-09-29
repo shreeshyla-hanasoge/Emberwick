@@ -311,4 +311,35 @@ export const MUTANTS = [
     find: "    else this.layers.remove('plugins')",
     replace: "",
   },
+  // ------------------------------------------------------ exact crosshair --
+  {
+    name: 'An exact crosshair is re-snapped by the 22px magnet',
+    file: 'src/chart/render/crosshair.js',
+    find: '  if (bar && !cursor.exact) {\n    x = ts.x(i) // snap to the bar slot',
+    replace: '  if (bar) {\n    x = ts.x(i) // snap to the bar slot',
+  },
+  {
+    name: 'Two tags describe one dragged point',
+    file: 'src/chart/render/crosshair.js',
+    find: '  if (cursor.exact && cursor.tags === false) return',
+    replace: '',
+  },
+  {
+    name: "The crosshair tag re-reads an exact point's price from its y",
+    file: 'src/chart/render/crosshair.js',
+    find: '(cursor.exact && Number.isFinite(cursor.price) ? cursor.price : ps.price(y))',
+    replace: '(ps.price(y))',
+  },
+  {
+    name: 'An exact point with a null price reaches toFixed()',
+    file: 'src/chart/render/crosshair.js',
+    find: '(cursor.exact && Number.isFinite(cursor.price) ? cursor.price : ps.price(y))',
+    replace: '(cursor.exact && isFinite(cursor.price) ? cursor.price : ps.price(y))',
+  },
+  {
+    name: 'The crosshair event reports a y round-trip instead of the snapped price',
+    file: 'src/chart/core/Chart.js',
+    find: 'const price = p.exact && Number.isFinite(p.price) ? p.price : pane.ps.price(p.y)',
+    replace: 'const price = pane.ps.price(p.y)',
+  },
 ]

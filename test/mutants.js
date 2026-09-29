@@ -593,8 +593,10 @@ const CORE_MUTANTS = [
   {
     name: 'The crosshair payload reads the price pane whatever pane is hovered',
     file: 'src/chart/core/Chart.js',
-    find: '        if (bar) payload = { index: i, bar, price: pane.ps.price(p.y), pane: pane.id }',
-    replace: '        if (bar) payload = { index: i, bar, price: this.ps.price(p.y), pane: pane.id }',
+    // Re-anchored in 0.12.0: the payload's price now comes from a local that
+    // prefers an exact point's own price, and falls back to this same read.
+    find: ' ? p.price : pane.ps.price(p.y)',
+    replace: ' ? p.price : this.ps.price(p.y)',
   },
   {
     name: 'The crosshair event goes silent outside the price pane',

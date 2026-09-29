@@ -19,7 +19,7 @@ export function drawCrosshair(ctx, s) {
 
   let x = cursor.x
   let y = cursor.y
-  if (bar) {
+  if (bar && !cursor.exact) {
     x = ts.x(i) // snap to the bar slot
     if (magnet) {
       // magnet to the nearest OHLC value
@@ -47,12 +47,20 @@ export function drawCrosshair(ctx, s) {
   ctx.stroke()
   ctx.restore()
 
+  // The plugin draws this point's own axis tags (an accent tag per anchor);
+  // two tags for one point would hide one and disagree past the newest bar.
+  if (cursor.exact && cursor.tags === false) return
+
   ctx.font = theme.font
   ctx.textBaseline = 'middle'
 
   // price tag
   const { step } = priceTicks(ps.lo, ps.hi, Math.max(2, Math.floor(plot.h / 58)))
-  const priceLabel = ps.price(y).toFixed(decimalsFor(step))
+  // An exact point was snapped by a plugin (a drawing anchor, a level, an
+  // angle): re-snapping it with this renderer's own 22px magnet would make the
+  // tag disagree with the handle it sits beside. Number.isFinite: a null or
+  // string price must fall back, not reach toFixed() inside the frame.
+  const priceLabel = (cursor.exact && Number.isFinite(cursor.price) ? cursor.price : ps.price(y)).toFixed(decimalsFor(step))
   ctx.textAlign = 'left'
   const pw = ctx.measureText(priceLabel).width
   ctx.fillStyle = theme.labelBg

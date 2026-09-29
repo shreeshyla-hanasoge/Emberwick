@@ -924,6 +924,77 @@ test('setCrosshair outside a frame announces at once, and null clears', () => {
   assert.equal(chart.cursor, null)
 })
 
+// ------------------------------------------------------- exact crosshair
+
+/** The crosshair's dashed lines on the overlay: [vertical x, horizontal y]. */
+const crossLines = (chart) => {
+  const ops = chart.layers.canvas.overlay.ops
+  const mv = ops.filter((o) => o.op === 'moveTo')
+  return [mv[0].args[0], mv[1].args[1]]
+}
+
+test('an exact crosshair is drawn where the plugin put it, with no slot or magnet snap', () => {
+  const chart = charted()                              // magnet on
+  const p = recorder()
+  chart.addPlugin(p)
+  const x = chart.ts.x(1990) + 3.2                     // between slots
+  const y = chart.ps.y(24000) + 6                      // 6px off a close: the magnet would take it
+  p.host.setCrosshair({ x, y })
+  clearOps(chart); frame(chart, 16, ['overlay'])
+  const snapped = crossLines(chart)
+  assert.equal(snapped[0], Math.round(chart.ts.x(1990)) + 0.5, 'a raw point snaps to its slot')
+  assert.equal(snapped[1], Math.round(chart.ps.y(24000)) + 0.5, 'and to the magnet')
+
+  p.host.setCrosshair({ x, y, exact: true, price: 24000.123 })
+  clearOps(chart); frame(chart, 16, ['overlay'])
+  assert.deepEqual(crossLines(chart), [Math.round(x) + 0.5, Math.round(y) + 0.5])
+  const texts = chart.layers.canvas.overlay.ops.filter((o) => o.op === 'fillText').map((o) => o.args[0])
+  assert.ok(texts.includes(p.host.formatPrice(24000.123)), `the tag reads the stored price (${texts.join(', ')})`)
+})
+
+test('an exact crosshair with a null price falls back to the y it is drawn at', () => {
+  const chart = charted()
+  const p = recorder()
+  chart.addPlugin(p)
+  const heard = []
+  chart.subscribe('crosshair', (c) => heard.push(c && c.price))
+  const y = chart.ps.y(24000.5)
+  p.host.setCrosshair({ x: 300, y, exact: true, price: null })
+  clearOps(chart); frame(chart, 16, ['overlay'])     // must not throw on null.toFixed()
+  assert.ok(Math.abs(heard[0] - 24000.5) < 1e-6, 'the event reports ps.price(y), not null')
+})
+
+test("the crosshair event carries an exact point's stored price, not a y round-trip", () => {
+  const chart = charted()
+  const p = recorder()
+  chart.addPlugin(p)
+  const heard = []
+  chart.subscribe('crosshair', (c) => heard.push(c && c.price))
+  p.host.setCrosshair({ x: 300, y: 200, exact: true, price: 24000.123 })
+  assert.deepEqual(heard, [24000.123])
+})
+
+test('tags:false draws the crosshair lines and leaves the axis tags to the plugin', () => {
+  const chart = charted()
+  const p = recorder()
+  chart.addPlugin(p)
+  p.host.setCrosshair({ x: 300, y: 200, exact: true, price: 24000, tags: false })
+  clearOps(chart); frame(chart, 16, ['overlay'])
+  const ops = chart.layers.canvas.overlay.ops
+  assert.ok(ops.some((o) => o.op === 'stroke'))
+  assert.equal(ops.filter((o) => o.op === 'fillText').length, 0)
+})
+
+test('a touch gesture a plugin claimed leaves no crosshair when it ends', () => {
+  const chart = charted()
+  const p = recorder({ pointerDown: true, pointerMove: (e) => p.host.setCrosshair({ x: e.x, y: e.y, exact: true, price: 24000 }) })
+  chart.addPlugin(p)
+  chart._onDown(touch(400, 200)); chart._onMove(touch(380, 210))
+  assert.ok(chart.cursor && chart.cursor.exact, 'the plugin placed an exact crosshair during its drag')
+  chart._onUp(touch(380, 210))
+  same(chart.cursor, null, 'dismissed with the finger')
+})
+
 // ------------------------------------------------------------------ cursor
 
 test('cursor precedence is override, then plugin hover, then marker, then crosshair; writes dedupe', () => {

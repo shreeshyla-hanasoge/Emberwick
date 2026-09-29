@@ -1209,7 +1209,11 @@ export class Chart {
         const bar = this.bars[i]
         // `price` is in THAT pane's scale, so `pane` has to come with it —
         // 63.4 means nothing without knowing it is the RSI pane.
-        if (bar) payload = { index: i, bar, price: pane.ps.price(p.y), pane: pane.id }
+        // An exact point was already snapped by a plugin: report the price it
+        // stored, not a y round-trip of it. Number.isFinite, because the
+        // global one reads null as 0.
+        const price = p.exact && Number.isFinite(p.price) ? p.price : pane.ps.price(p.y)
+        if (bar) payload = { index: i, bar, price, pane: pane.id }
       }
       for (const fn of this._listeners.crosshair) this._fire(fn, 'crosshair', payload, safe)
     }
