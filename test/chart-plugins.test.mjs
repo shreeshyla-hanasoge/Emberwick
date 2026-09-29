@@ -1180,3 +1180,16 @@ test('host.formatPrice uses the decimals of the pane axis it names', () => {
     assert.equal(p.host.formatPrice(pane.ps.price(y), pane), tag.args[0], `${id}: same decimals as the crosshair`)
   }
 })
+
+// ----------------------------------------------------------------- exports
+
+test('the core entry exports the coercion and dash table plugins share with it', async () => {
+  const core = await import('../src/chart/index.js')
+  const { toNumber } = await import('../src/chart/core/formatters.js')
+  const { DASH } = await import('../src/chart/render/style.js')
+  same(core.toNumber, toNumber, 'the same toNumber the core coerces with')
+  same(core.DASH, DASH, 'the same dash table price lines and series use')
+  assert.equal(core.toNumber('24000.5'), 24000.5)
+  assert.ok(Number.isNaN(core.toNumber(null)), 'null is not 0')
+  assert.match(core.version, /^\d+\.\d+\.\d+$/)
+})

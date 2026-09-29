@@ -42,6 +42,33 @@ export interface Theme {
   font: string
   priceAxisWidth: number
   timeAxisHeight: number
+  /**
+   * Selection, handles and snap rings of emberwick/drawings. The core never
+   * reads the three drawing keys; each falls back to a colour derived from
+   * `background`.
+   */
+  drawingAccent?: string
+  /** Default stroke of a new drawing (emberwick/drawings). */
+  drawingLine?: string
+  /** Fibonacci level colours, in level order (emberwick/drawings). */
+  drawingFib?: string[]
+}
+
+/**
+ * The chart's timestamp formatter (chart.fmt): every rendered time goes
+ * through it, in the zone given by `timeZone` (null: the browser's own).
+ */
+export interface TimeFormatter {
+  /** IANA zone, or null for the browser's local zone. */
+  readonly zone: string | null
+  /** Axis label for `ms` at bar duration `tfMs`: a time, or a date on daily bars. */
+  axis(ms: number, tfMs?: number): string
+  /** 'YYYY-MM-DD HH:mm' — the crosshair's time tag. */
+  full(ms: number): string
+  /** '3 Mar' */
+  date(ms: number): string
+  /** A number unique per calendar day in the zone (YYYYMMDD). */
+  dayKey(ms: number): number
 }
 
 /* --------------------------------------------------------------- markers -- */
@@ -589,7 +616,12 @@ export declare class Chart {
   setMagnet(on: boolean): void
   snapToRealtime(): void
 
-  /** PNG data URL of all layers composited. */
+  /**
+   * PNG data URL of all layers composited. With a plugin attached, every
+   * layer is re-rendered from the current state first, and the plugin's
+   * export pass (`info.exporting`) is painted between the candles and the
+   * crosshair.
+   */
   toImage(): string
   /** Rolling frames-per-second of the render loop. */
   readonly fps: number
@@ -662,8 +694,27 @@ export declare class Chart {
    * Returns false if the chart is destroyed or the loop is already running.
    */
   resume(): boolean
-  /** Removes listeners, canvases and the render loop. */
+  /** Removes listeners, canvases, attached plugins and the render loop. */
   destroy(): void
+
+  /**
+   * Attach an opt-in plugin. Idempotent per object. Throws on a non-object
+   * or a destroyed chart. The first attach creates the `plugins` canvas,
+   * between the candles and the crosshair.
+   * @experimental The plugin API may change before 1.0.
+   */
+  addPlugin(plugin: ChartPlugin): this
+  /**
+   * Cancel the plugin's gesture if it owns one, call its detach(), and drop
+   * the `plugins` canvas with the last plugin.
+   * @experimental The plugin API may change before 1.0.
+   */
+  removePlugin(plugin: ChartPlugin): this
+
+  /** The timestamp formatter every rendered time goes through. */
+  readonly fmt: TimeFormatter
+  readonly theme: Theme
+  readonly container: HTMLElement
 
   readonly bars: Bar[]
   readonly priceLines: PriceLine[]
@@ -672,6 +723,179 @@ export declare class Chart {
   readonly ps: PriceScale
   /** The price pane's rect, live. Superseded by paneRect(id). */
   readonly plot: Rect
+}
+
+/* --------------------------------------------------------------- plugins -- */
+
+/** Why a plugin is told there is nothing under the hover point. */
+export type HoverNoneReason = 'leave' | 'pan' | 'occluded'
+
+/**
+ * A crosshair point a plugin has already snapped. The renderer draws it where
+ * it is, with no slot or magnet snap, and the 'crosshair' event reports
+ * `price` rather than a y round-trip. `tags: false` draws the lines only: the
+ * plugin draws the point's own axis tags.
+ * @experimental
+ */
+export interface ExactPoint {
+  x: number
+  y: number
+  exact: true
+  price?: number
+  tags?: false
+}
+
+/**
+ * A pane as a plugin sees it: the live internal object, read-only by
+ * contract.
+ * @experimental
+ */
+export interface PaneView {
+  readonly id: string
+  readonly rect: Rect
+  readonly ps: PriceScale
+  /** The series drawn on this pane this frame. */
+  readonly visible: ReadonlyArray<{ opts: object; drawable: ReadonlyArray<{ index: number; value: number }> }>
+}
+
+/**
+ * A pointer event as offered to plugins, in chart-local CSS px.
+ * @experimental
+ */
+export interface PluginPointer {
+  x: number
+  y: number
+  pointerId: number
+  /** For a dblclick or contextmenu, the type of the press that made it. */
+  pointerType: 'mouse' | 'pen' | 'touch'
+  button: number
+  buttons: number
+  shiftKey: boolean
+  altKey: boolean
+  ctrlKey: boolean
+  metaKey: boolean
+  /** The chart's own region test, so a plugin agrees with the chart's gestures. */
+  region: 'plot' | 'priceAxis' | 'timeAxis'
+  /** The pane under (or nearest) the point; null on the time axis. */
+  pane: PaneView | null
+  /** e.timeStamp, or 0 when absent. */
+  timeStamp: number
+  event: Event
+}
+
+/**
+ * What a frame hook is told. ONE object, reused every frame: read it, do not
+ * keep it.
+ * @experimental
+ */
+export interface PluginFrameInfo {
+  /** The view moved or everything was invalidated: re-derive held points here. */
+  full: boolean
+  dt: number
+  /** True during toImage()'s export pass: draw committed content only. */
+  exporting: boolean
+}
+
+/**
+ * The chart as one attached plugin sees it. One object per attachment, all
+ * getters: every read is live.
+ * @experimental
+ */
+export interface PluginHost {
+  readonly chart: Chart
+  readonly ts: TimeScale
+  /** What is on screen — under replay, the revealed prefix. */
+  readonly bars: readonly Bar[]
+  /** Replay's whole dataset while replaying, else `bars`. Resolve anchors against this. */
+  readonly source: readonly Bar[]
+  readonly replay: Replay | null
+  readonly timeframeMs: number
+  /** Bumped whenever the bar array is replaced. */
+  readonly barGen: number
+  /** The live pane array, top to bottom. Read-only by contract. */
+  readonly panes: readonly PaneView[]
+  readonly theme: Theme
+  readonly fmt: TimeFormatter
+  readonly width: number
+  readonly height: number
+  readonly pixelRatio: number
+  /** Bottom of the last pane: where the time axis starts. */
+  readonly plotBottom: number
+  /** chart.options.magnet. */
+  readonly magnet: boolean
+  readonly priceLines: readonly PriceLine[]
+  /** options.animate !== false; setAnimate() updates it. */
+  readonly animate: boolean
+  readonly exporting: boolean
+  /** Repaint the plugins layer next frame — not the candles. */
+  invalidate(): void
+  /** A gesture cursor ('grabbing') that wins over everything while non-null. */
+  setCursor(css: string | null): void
+  /** What THIS plugin has under the hover point; occludes marker hover. */
+  setHover(css: string | null): void
+  /**
+   * Move the crosshair. From tick() it lands in the same frame's overlay, and
+   * the 'crosshair' and 'markerHover' listeners run after the frame has drawn.
+   */
+  setCrosshair(p: ExactPoint | { x: number; y: number } | null): void
+  /**
+   * Hand back a gesture this plugin owns without an up (Esc, undo, an API
+   * edit of the dragged drawing). The rest of the press moves the raw
+   * crosshair only: it never pans and is never a tap. No-op when not owner.
+   */
+  release(): void
+  paneAt(y: number): PaneView | null
+  paneById(id: string): PaneView | null
+  /** With the decimals the pane's own axis uses (the price pane by default). */
+  formatPrice(price: number, pane?: PaneView): string
+  /** Emits the chart's 'error' event, phase `plugin <phase>`. */
+  reportError(err: unknown, phase: string): void
+}
+
+/**
+ * An opt-in extension drawn on its own layer and offered the chart's input
+ * first. Every hook is optional; `this` is the plugin. A hook that throws is
+ * reported through 'error' and reads as "not claimed"; a plugin whose frame
+ * hooks fail ten painted frames in a row is removed.
+ *
+ * Every press a plugin claims ends exactly once: pointerUp (including an up
+ * lost to a context menu), or pointerCancel, or neither after its own
+ * release().
+ * @experimental The plugin API may change before 1.0.
+ */
+export interface ChartPlugin {
+  attach?(host: PluginHost): void
+  detach?(): void
+  /**
+   * Advance the plugin's own state, every frame while attached. Return true
+   * to keep the loop awake WITHOUT repainting the candles.
+   */
+  tick?(dt: number, info: PluginFrameInfo): boolean | void
+  /** Paint. The context is cleared, DPR-scaled and save/restore-wrapped. */
+  draw?(ctx: CanvasRenderingContext2D, info: PluginFrameInfo): void
+  /** After the chart's own state events: the safe place to emit to listeners. */
+  afterFrame?(): void
+  /**
+   * Mouse and pen hover. e === null carries why: the pointer left, an
+   * unclaimed pan press began, or a plugin above reported a hit. May repeat.
+   */
+  hover?(e: PluginPointer | null, reason?: HoverNoneReason):
+    { cursor?: string | null; crosshair?: ExactPoint | null } | null | void
+  /** true: this plugin owns the gesture until up, cancel or release(). */
+  pointerDown?(e: PluginPointer): boolean | void
+  /** The owner's own pointer only. */
+  pointerMove?(e: PluginPointer): void
+  /** Runs synchronously inside the DOM pointerup, so focus() works on iOS. */
+  pointerUp?(e: PluginPointer): void
+  pointerCancel?(): void
+  /** An unclaimed primary press that never left the slop, at its down point. true: consumed. */
+  tap?(e: PluginPointer): boolean | void
+  /** true: consumed, no view reset. */
+  doubleClick?(e: PluginPointer): boolean | void
+  /** true: consumed, the native menu is prevented. */
+  contextMenu?(e: PluginPointer): boolean | void
+  /** true: consumed (preventDefault, no pan or zoom key). */
+  keyDown?(e: KeyboardEvent): boolean | void
 }
 
 /** Preferred entry point. */
@@ -685,6 +909,15 @@ export declare const version: string
 
 /** Seeded PRNG used by RandomFeed. */
 export declare function mulberry32(seed: number): () => number
+
+/**
+ * Coerce to a finite number, or NaN: numbers and numeric strings pass; null,
+ * booleans, '' and everything else are NaN, never 0.
+ */
+export declare function toNumber(v: unknown): number
+
+/** Canvas dash arrays for each LineStyle. */
+export declare const DASH: { readonly solid: number[]; readonly dashed: number[]; readonly dotted: number[] }
 
 export declare class Smoothed {
   constructor(value?: number, tau?: number)
