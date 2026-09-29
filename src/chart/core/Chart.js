@@ -611,6 +611,8 @@ export class Chart {
     let moved = false
     const pointers = new Map()
     let pinchDist = 0
+    /** Midpoint of the pinch pair on the previous move; null until one is seen. */
+    let pinchMid = null
 
     /**
      * Touch gesture state.
@@ -667,9 +669,14 @@ export class Chart {
 
     this._onDown = (e) => {
       pointers.set(e.pointerId, localPos(e))
+      // A third finger (a palm, a stray finger on a tablet) joins nothing: the
+      // pinch keeps its first two, and the extra finger starts no gesture of
+      // its own. In 0.11 it fell through and started a pan.
+      if (pointers.size > 2) return
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()]
         pinchDist = Math.hypot(a.x - b.x, a.y - b.y)
+        pinchMid = null
         dragging = false
         // A second finger means zoom, which is a statement about the view
         // rather than about one bar. Drop any crosshair the first finger
@@ -724,12 +731,34 @@ export class Chart {
       const p = localPos(e)
       if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p)
 
-      if (pointers.size === 2) {
-        const [a, b] = [...pointers.values()]
+      if (pointers.size >= 2) {
+        // The first two fingers ARE the pinch. `=== 2` froze it the moment a
+        // third touched down, and let the third steer a pan.
+        const it = pointers.keys()
+        const ia = it.next().value
+        const ib = it.next().value
+        if (e.pointerId !== ia && e.pointerId !== ib) return
+        const a = pointers.get(ia)
+        const b = pointers.get(ib)
         const d = Math.hypot(a.x - b.x, a.y - b.y)
-        if (pinchDist > 0 && d > 0) {
-          const mid = (a.x + b.x) / 2
-          this.ts.zoomAt(mid, d / pinchDist)
+        const mid = (a.x + b.x) / 2
+        // Two fingers pan as well as zoom: moving the pair moves the chart. It is
+        // the only way to reposition while one finger belongs to a drawing tool.
+        if (pinchMid !== null) {
+          this.ts.panBy(mid - pinchMid)
+          this.loop.invalidate('all')
+          this._maybeLoadHistory()
+        }
+        pinchMid = mid
+        if (pinchDist > 0 && d > 0 && this.ts.zoomAt(mid, d / pinchDist)) {
+          // A pinch is a drag, and drags jump(): panBy() above writes the
+          // right edge's value AND target, so an eased zoom would have its
+          // right-edge half thrown away by the very next move while the
+          // spacing went on easing — the pinch would slide off the fingers
+          // toward the right edge. Glued, the bar under the midpoint stays
+          // under it on every move.
+          this.ts._spacing.jump(this.ts._spacing.target)
+          this.ts._right.jump(this.ts._right.target)
           this.loop.invalidate('all')
         }
         pinchDist = d
@@ -827,8 +856,38 @@ export class Chart {
     }
 
     this._onUp = (e) => {
+      const wasPinch = pointers.size >= 2
       pointers.delete(e.pointerId)
-      if (pointers.size < 2) pinchDist = 0
+      if (pointers.size < 2) {
+        pinchDist = 0
+        pinchMid = null
+      } else {
+        // A finger left a 3-finger touch: re-seed from the pair that remains,
+        // or the next move zooms by the ratio against a pair that is gone.
+        const [a, b] = [...pointers.values()]
+        pinchDist = Math.hypot(a.x - b.x, a.y - b.y)
+        pinchMid = null
+      }
+      if (wasPinch) {
+        if (pointers.size === 1) {
+          // The finger left behind by a pinch carries on panning, as the pair
+          // was: a reader who lifts one finger of a zoom has not started a new
+          // gesture, and must not get a crosshair tracking the other one.
+          // Horizontal only (no dragPane): they never asked to take the pane
+          // out of autoscale. touchMode 'pan' also means it is never a tap.
+          const [rest] = pointers.values()
+          dragging = true
+          mode = 'pan'
+          dragPane = null
+          touchMode = 'pan'
+          moved = true
+          lastX = rest.x
+          lastY = rest.y
+          lastT = performance.now()
+        }
+        try { el.releasePointerCapture(e.pointerId) } catch (_) {}
+        return
+      }
       clearHold()
       /**
        * A tap: down and up inside the slop, before the hold elapsed. That is
