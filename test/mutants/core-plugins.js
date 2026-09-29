@@ -35,4 +35,18 @@ export const MUTANTS = [
     find: '          this.ts._spacing.jump(this.ts._spacing.target)\n          this.ts._right.jump(this.ts._right.target)\n',
     replace: '',
   },
+
+  // ------------------------------------------------------------ Loop wake --
+  {
+    name: 'The first frame after idle takes 63% of an ease',
+    file: 'src/chart/core/Loop.js',
+    find: '    const dt = this._woke ? 16.667 : Math.min(Math.max(now - this._last, 1), 64)',
+    replace: '    const dt = Math.min(Math.max(now - this._last, 1), 64)',
+  },
+  {
+    name: 'A restarted loop treats its first frame as a wake from idle',
+    file: 'src/chart/core/Loop.js',
+    find: '    this._last = performance.now()\n    this._woke = false\n',
+    replace: '    this._last = performance.now()\n',
+  },
 ]

@@ -23,6 +23,12 @@ export class Loop {
     this._raf = 0
     this._dirty = new Set()
     this._last = 0
+    /**
+     * True when the last frame asked for no successor: the loop went idle and
+     * `_last` is going stale. The frame that wakes it must not measure dt
+     * from there. See _tick.
+     */
+    this._woke = false
     this._running = false
     this._frames = 0
     this._fpsAt = 0
@@ -45,6 +51,7 @@ export class Loop {
     // would give up again after a single further error.
     this._frameErrors = 0
     this._last = performance.now()
+    this._woke = false
     this._fpsAt = this._last
     this.invalidate('all')
   }
@@ -63,7 +70,10 @@ export class Loop {
   _tick(now) {
     this._raf = 0
     if (!this._running) return
-    const dt = Math.min(Math.max(now - this._last, 1), 64)
+    // After an idle stretch `_last` is stale and dt would clamp to 64 — 63% of a
+    // tau-65 ease in one step. The first frame after idle is one nominal frame.
+    const dt = this._woke ? 16.667 : Math.min(Math.max(now - this._last, 1), 64)
+    this._woke = false
     this._last = now
 
     this._frames++
@@ -100,5 +110,6 @@ export class Loop {
       console.error('[Emberwick] frame error', e)
     }
     if (wantMore || this._dirty.size) this._schedule()
+    else this._woke = true
   }
 }
