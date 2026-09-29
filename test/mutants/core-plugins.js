@@ -69,4 +69,29 @@ export const MUTANTS = [
     find: '    this.options.animate = !!on',
     replace: '',
   },
+  // --------------------------------------------------------------- Layers --
+  {
+    name: 'A late layer stays 0x0',
+    file: 'src/chart/core/Layers.js',
+    find: '    this._size(name)\n    return this.ctx[name]',
+    replace: '    return this.ctx[name]',
+  },
+  {
+    name: 'The plugins layer stacks above the crosshair',
+    file: 'src/chart/core/Layers.js',
+    find: '    this._create(name, i < 0 ? this.names.length : i)',
+    replace: '    this._create(name, this.names.length)',
+  },
+  {
+    name: 'Removing a layer leaves a gap in the stacking order',
+    file: 'src/chart/core/Layers.js',
+    find: "    this.names.splice(this.names.indexOf(name), 1)\n    this.names.forEach((n, i) => { this.canvas[n].style.zIndex = String(i + 1) })",
+    replace: '    this.names.splice(this.names.indexOf(name), 1)',
+  },
+  {
+    name: 'An export pass lands on top of the crosshair instead of between the layers',
+    file: 'src/chart/core/Layers.js',
+    find: '      if (between) between(c, n)',
+    replace: '    }\n    for (const n of names) {\n      if (between) between(c, n)',
+  },
 ]

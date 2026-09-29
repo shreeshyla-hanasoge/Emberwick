@@ -14,6 +14,7 @@ before(() => { restoreDom = installDom() })
 after(() => restoreDom())
 
 const { createChart, Smoothed } = await import('../src/chart/index.js')
+const { Layers } = await import('../src/chart/core/Layers.js')
 
 const T0 = 1_700_000_000_000
 const MIN = 60_000
@@ -107,4 +108,79 @@ test('setAnimate records the choice in options.animate', () => {
   assert.equal(chart.live.enabled, false)
   chart.setAnimate(true)
   assert.equal(chart.options.animate, true)
+})
+
+// ------------------------------------------------------------------ layers
+
+const zOrder = (layers) => layers.names.map((n) => [n, layers.canvas[n].style.zIndex])
+
+test('Layers.add stacks a canvas below the one named, sized at once, and renumbers', () => {
+  const names = ['base', 'main', 'overlay']
+  const layers = new Layers(makeContainer(), names)
+  const ctx = layers.add('plugins', 'overlay')
+  assert.deepEqual(names, ['base', 'main', 'overlay'], "the caller's array is never mutated")
+  assert.deepEqual(zOrder(layers), [['base', '1'], ['main', '2'], ['plugins', '3'], ['overlay', '4']])
+  assert.equal(layers.canvas.plugins.width, 900, 'sized immediately, not 0x0 until a resize')
+  assert.equal(layers.canvas.plugins.height, 500)
+  assert.equal(ctx, layers.ctx.plugins)
+  assert.equal(layers.add('plugins', 'overlay'), ctx, 'idempotent')
+  assert.equal(layers.names.length, 4)
+})
+
+test('a late layer is sized at the device pixel ratio', () => {
+  const was = globalThis.window.devicePixelRatio
+  globalThis.window.devicePixelRatio = 2
+  try {
+    const layers = new Layers(makeContainer(), ['base', 'main', 'overlay'])
+    layers.add('plugins', 'overlay')
+    assert.equal(layers.canvas.plugins.width, 1800)
+    const t = layers.canvas.plugins.ops.filter((o) => o.op === 'setTransform')
+    assert.deepEqual(t[t.length - 1].args, [2, 0, 0, 2, 0, 0], 'and pre-scaled like the others')
+  } finally {
+    globalThis.window.devicePixelRatio = was
+  }
+})
+
+test('Layers.add with no such neighbour puts the canvas on top', () => {
+  const layers = new Layers(makeContainer(), ['base', 'main'])
+  layers.add('top')
+  assert.deepEqual(zOrder(layers), [['base', '1'], ['main', '2'], ['top', '3']])
+})
+
+test('Layers.remove drops the canvas and renumbers the rest', () => {
+  const container = makeContainer()
+  const layers = new Layers(container, ['base', 'main', 'overlay'])
+  layers.add('plugins', 'overlay')
+  const c = layers.canvas.plugins
+  let removed = false
+  c.remove = () => { removed = true }
+  layers.remove('plugins')
+  assert.ok(removed, 'the element left the DOM')
+  assert.equal(layers.canvas.plugins, undefined)
+  assert.equal(layers.ctx.plugins, undefined)
+  assert.deepEqual(zOrder(layers), [['base', '1'], ['main', '2'], ['overlay', '3']])
+  layers.remove('plugins')                             // a no-op, not a throw
+  assert.equal(layers.names.length, 3)
+})
+
+test('composite() flattens every layer in stack order, as it always did', () => {
+  const layers = new Layers(makeContainer(), ['base', 'main', 'overlay'])
+  layers.add('plugins', 'overlay')
+  const out = layers.composite()
+  const drawn = out.ops.filter((o) => o.op === 'drawImage').map((o) => o.args[0])
+  assert.deepEqual(drawn, ['base', 'main', 'plugins', 'overlay'].map((n) => layers.canvas[n]))
+  assert.equal(out.width, 900)
+})
+
+test('composite(names, between) paints a pass into the stack after the layer named', () => {
+  const layers = new Layers(makeContainer(), ['base', 'main', 'plugins', 'overlay'])
+  const seen = []
+  const out = layers.composite(['base', 'main', 'overlay', 'gone'], (c, name) => {
+    seen.push(name)
+    if (name === 'main') c.fillRect(1, 2, 3, 4)
+  })
+  assert.deepEqual(seen, ['base', 'main', 'overlay', 'gone'], 'a missing layer is skipped, not thrown on')
+  const ops = out.ops.filter((o) => o.op === 'drawImage' || o.op === 'fillRect')
+    .map((o) => (o.op === 'fillRect' ? 'pass' : layers.names.find((n) => layers.canvas[n] === o.args[0])))
+  assert.deepEqual(ops, ['base', 'main', 'pass', 'overlay'], 'the live plugins canvas is left out')
 })
