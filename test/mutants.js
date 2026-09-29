@@ -12,8 +12,19 @@
  * `find` must match the current source exactly. When a mutant reports
  * ANCHOR NOT FOUND the code moved underneath it — re-anchor it rather than
  * deleting it, or you quietly lose the coverage it was measuring.
+ *
+ * Tests may read only files under `src/` and `test/`: the scratch copy each
+ * mutant runs in holds nothing else, and a test that reads anything outside
+ * them fails in every copy, which reads as every mutant "caught". `file` is
+ * repo-relative (`src/drawings/model/time.js`), never relative to
+ * `src/drawings`.
+ *
+ * Mutants for code added since 0.12 live one file per unit under
+ * test/mutants/ and are appended below, so no two people edit one manifest.
  */
-export const MUTANTS = [
+import { readdirSync, existsSync } from 'node:fs'
+
+const CORE_MUTANTS = [
   {
     name: 'PriceScale rejects numeric-string OHLC',
     file: 'src/chart/core/PriceScale.js',
@@ -709,3 +720,13 @@ export const MUTANTS = [
     replace: '    if (needed < this.minSpacing) this.minSpacing = Math.min(needed, FIT_FLOOR)',
   },
 ]
+
+const dir = new URL('./mutants/', import.meta.url)
+const extra = []
+if (existsSync(dir)) {
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.js')).sort()) {
+    extra.push(...(await import(new URL(f, dir))).MUTANTS)
+  }
+}
+/** Each unit owns test/mutants/<unit>.js; nobody edits a shared manifest. */
+export const MUTANTS = [...CORE_MUTANTS, ...extra]

@@ -9,9 +9,10 @@
  *
  *   npm run mutate
  *
- * Exit code is the number of surviving mutants, so CI fails on any survivor.
+ * Exit code is survivors + unanchored + invalid, so CI fails on any of them.
  */
 import { cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { resolve, dirname, join } from 'node:path'
@@ -37,22 +38,91 @@ if (!testFiles.length) {
   process.exit(1)
 }
 
+/**
+ * The TAP reporter, whatever the terminal: its result blocks carry each
+ * failure's error name and message in a shape stable enough to read back,
+ * which the INVALID verdict below depends on.
+ */
 const runSuite = (cwd) => {
-  const r = spawnSync(process.execPath, ['--test', ...testFiles], { cwd, encoding: 'utf8' })
+  const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...testFiles], { cwd, encoding: 'utf8' })
   // Guard against the suite failing to RUN: a crashed runner is not a catch.
-  if (!/[#\u2139] tests \d+/.test(r.stdout)) {
+  if (!/[#ℹ] tests \d+/.test(r.stdout)) {
     console.error('\nThe test runner did not report a summary — it failed to start:')
     console.error((r.stdout + r.stderr).split('\n').slice(-6).join('\n'))
     process.exit(1)
   }
-  return r.status === 0
+  return { green: r.status === 0, out: r.stdout }
+}
+
+/**
+ * The output of each FAILING top-level test: its result block, plus the
+ * diagnostic lines printed since the previous result. A file that fails to
+ * load reports only 'test failed' in its block; the SyntaxError that caused
+ * it arrives in those `#` lines just before.
+ */
+const failures = (tap) => {
+  const out = []
+  let buf = []
+  let inBlock = false
+  let failing = false
+  for (const line of tap.split('\n')) {
+    buf.push(line)
+    if (/^(ok|not ok) \d+ /.test(line)) {
+      inBlock = true
+      failing = line.startsWith('not ok')
+    } else if (inBlock && line === '  ...') {
+      if (failing) out.push(buf.join('\n'))
+      buf = []
+      inBlock = false
+    }
+  }
+  return out
+}
+
+/**
+ * A mutant is only caught if it broke a BEHAVIOUR. One whose replacement
+ * names something out of scope, or does not parse, fails every test that
+ * loads it with a ReferenceError or SyntaxError — which says nothing about
+ * whether the suite defends the fix it reverts.
+ */
+const INVALID = /ReferenceError|SyntaxError|is not defined/
+const isInvalid = (tap) => {
+  const f = failures(tap)
+  return f.length > 0 && f.every((block) => INVALID.test(block))
+}
+
+/** src/ and test/ only: no node_modules, so this stays fast. */
+const scratchCopy = async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'emberwick-mut-'))
+  for (const d of ['src', 'test']) {
+    await cp(resolve(root, d), join(dir, d), { recursive: true })
+  }
+  return dir
 }
 
 // The suite must be green before any of this means anything.
 process.stdout.write('baseline ... ')
-if (!runSuite(root)) {
+if (!runSuite(root).green) {
   console.error('FAILED\n\nThe suite is red before mutation. Fix that first.')
   process.exit(1)
+}
+console.log('green')
+
+// And green in a scratch copy, unmutated. A test that reads a file the copy
+// does not have (package.json, dist-lib/, a script) fails in EVERY copy, so
+// without this every mutant would read as "caught" and the run would lie.
+process.stdout.write('scratch baseline ... ')
+{
+  const dir = await scratchCopy()
+  try {
+    if (!runSuite(dir).green) {
+      console.error('FAILED\n\nThe suite is not green in a scratch copy of src/ and test/.')
+      console.error('A test is reading something outside them; tests may read only src/ and test/.')
+      process.exit(1)
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 }
 console.log('green\n')
 
@@ -64,26 +134,29 @@ if (!selected.length) {
 
 const survivors = []
 const unanchored = []
+const invalid = []
 
 for (const mutant of selected) {
-  const dir = await mkdtemp(join(tmpdir(), 'emberwick-mut-'))
+  const dir = await scratchCopy()
   try {
-    // Only what the suite reads: no node_modules, so this stays fast.
-    for (const d of ['src', 'test']) {
-      await cp(resolve(root, d), join(dir, d), { recursive: true })
-    }
     const target = join(dir, mutant.file)
-    const source = await readFile(target, 'utf8')
-    if (!source.includes(mutant.find)) {
+    // A missing file is a mis-anchored mutant, not a crash of the whole run.
+    const source = existsSync(target) ? await readFile(target, 'utf8') : null
+    if (source === null || !source.includes(mutant.find)) {
       unanchored.push(mutant.name)
-      console.log(`ANCHOR?  ${mutant.name}`)
+      console.log(`ANCHOR?  ${mutant.name}${source === null ? `  (no such file: ${mutant.file})` : ''}`)
       continue
     }
-    await writeFile(target, source.replace(mutant.find, mutant.replace))
+    // A function replacement, so `$&` or `$1` in a replacement is literal.
+    await writeFile(target, source.replace(mutant.find, () => mutant.replace))
 
-    if (runSuite(dir)) {
+    const run = runSuite(dir)
+    if (run.green) {
       survivors.push(mutant.name)
       console.log(`SURVIVED ${mutant.name}`)
+    } else if (isInvalid(run.out)) {
+      invalid.push(mutant.name)
+      console.log(`INVALID  ${mutant.name}`)
     } else {
       console.log(`caught   ${mutant.name}`)
     }
@@ -92,16 +165,21 @@ for (const mutant of selected) {
   }
 }
 
-const caught = selected.length - survivors.length - unanchored.length
+const caught = selected.length - survivors.length - unanchored.length - invalid.length
 console.log(`\n${caught}/${selected.length} caught`)
 
 if (unanchored.length) {
   console.error(`\n${unanchored.length} mutant(s) no longer match the source:`)
   for (const n of unanchored) console.error(`  - ${n}`)
-  console.error('Re-anchor them in test/mutants.js — deleting one silently drops its coverage.')
+  console.error('Re-anchor them in test/mutants.js or test/mutants/ — deleting one silently drops its coverage.')
+}
+if (invalid.length) {
+  console.error(`\n${invalid.length} mutant(s) were caught only by a ReferenceError or SyntaxError:`)
+  for (const n of invalid) console.error(`  - ${n}`)
+  console.error('The replacement broke the program, not the behaviour; rewrite it so it runs.')
 }
 if (survivors.length) {
   console.error(`\n${survivors.length} mutant(s) SURVIVED — these fixes have no test defending them:`)
   for (const n of survivors) console.error(`  - ${n}`)
 }
-process.exit(survivors.length + unanchored.length)
+process.exit(survivors.length + unanchored.length + invalid.length)
