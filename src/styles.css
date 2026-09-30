@@ -61,7 +61,7 @@ body.lock { overflow: hidden; }
 
 .brand p { font-size: 11px; color: var(--muted); margin-top: 1px; }
 
-.controls { display: flex; gap: 6px; flex-wrap: wrap; }
+.controls { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
 .btn {
   font: inherit; font-size: 12px; font-weight: 550;
@@ -202,9 +202,486 @@ body.lock { overflow: hidden; }
   .rp-read { display: none; }
 }
 
+@media (max-width: 1180px) {
+  /* the tagline is what pushes the last button onto a second row of its own */
+  .brand p { display: none; }
+}
+
 @media (max-width: 760px) {
   .hint { display: none; }
-  .brand p { display: none; }
+}
+
+/* ========================================================================= */
+/* DRAWING TOOLS: stage, rail, selection toolbar, menu, inspector            */
+/* ========================================================================= */
+
+.stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+.rail-wrap { display: flex; flex-shrink: 0; min-height: 0; }
+
+.chart-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.chart-area .chart-host { flex: 1; min-width: 0; }
+
+/* ---- tool rail ---------------------------------------------------------- */
+.rail {
+  --rb: 34px;
+  position: relative;
+  width: calc(var(--rb) + 16px);
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.rail::-webkit-scrollbar { display: none; }
+
+.rail-inner {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 2px;
+  padding: 8px 0;
+  min-height: 100%;
+}
+
+/* One pill that travels to the armed tool. Position comes from layout, the
+   spring from the overshooting curve; opacity handles "no tool armed". */
+.rail-pill {
+  position: absolute; left: 0; top: 0;
+  width: var(--rb); height: var(--rb);
+  border-radius: 9px;
+  background: rgba(38,166,154,0.13);
+  box-shadow: inset 0 0 0 1px rgba(38,166,154,0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform .28s cubic-bezier(.3,1.35,.5,1), opacity .15s;
+}
+
+.rail-btn {
+  position: relative; z-index: 1;
+  width: var(--rb); height: var(--rb);
+  flex-shrink: 0;
+  display: grid; place-items: center;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color .15s, background .15s, transform .12s;
+}
+.rail-btn:hover { color: var(--text); background: rgba(127,127,127,0.12); }
+.rail-btn:active { transform: scale(.9); }
+.rail-btn.on { color: var(--accent); }
+.rail-btn.on:hover { background: transparent; }
+.rail-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* the amber dot is the drawing accent: "this tool stays armed" */
+.rail-btn.sticky::after {
+  content: '';
+  position: absolute; top: 5px; right: 5px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #f5a524;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+.rail-sep {
+  width: 22px; height: 1px; flex-shrink: 0;
+  background: var(--border);
+  margin: 5px 0;
+}
+
+.rail-tip {
+  position: fixed; z-index: 60;
+  pointer-events: none;
+  padding: 5px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: #0b0e14;
+  color: #e6e9ef;
+  font-size: 11.5px; font-weight: 550;
+  white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.35);
+  animation: tip-in .12s ease-out both;
+}
+.rail-tip-right { transform: translateY(-50%); }
+.rail-tip-below { transform: translateX(-50%); }
+@keyframes tip-in { from { opacity: 0; } }
+
+/* ---- drawings strip ----------------------------------------------------- */
+.dbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  row-gap: 6px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.dbar::-webkit-scrollbar { display: none; }
+.dbar .spacer { flex: 1; }
+.dgrp { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+.dlabel {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; font-weight: 650;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.seg button {
+  font: inherit; font-size: 11.5px; font-weight: 550;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--border);
+  padding: 5px 9px;
+  cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--text); }
+.seg button.on { color: var(--accent); background: rgba(38,166,154,0.12); }
+
+.btn:disabled { opacity: .4; cursor: default; }
+.btn:disabled:hover { color: var(--muted); border-color: var(--border); }
+.ibtn { gap: 4px; padding: 5px 9px; }
+.ibtn-n { font-size: 10.5px; font-variant-numeric: tabular-nums; min-width: 7px; }
+.btn .ic { flex-shrink: 0; }
+
+.chip-pop {
+  color: var(--accent);
+  border-color: rgba(38,166,154,0.45);
+  animation: pop-in .2s cubic-bezier(.3,1.4,.5,1) both;
+}
+@keyframes pop-in { from { opacity: 0; scale: .9; } }
+
+.live {
+  display: inline-flex; align-items: center; gap: 10px;
+  /* A fixed slot: a readout that changes width every frame would resize the
+     strip, and a resized strip resizes the chart under the pointer. */
+  width: 250px; flex-shrink: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.live-idle { opacity: .5; }
+.live-phase {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--accent);
+}
+.live .up { color: var(--accent); font-weight: 600; }
+.live .down { color: var(--down); font-weight: 600; }
+.live-snap {
+  color: #f5a524;
+  border: 1px solid rgba(245,165,36,0.4);
+  border-radius: 5px;
+  padding: 0 6px;
+}
+
+/* ---- keyboard hints ----------------------------------------------------- */
+.kbds {
+  margin-left: auto;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: 4px 14px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.kbd-h {
+  display: inline-flex; align-items: center; gap: 5px;
+  white-space: nowrap;
+  animation: pop-in .18s ease-out both;
+}
+.kbd-note { font-size: 11px; }
+.kbd-btn { padding: 2px 9px; font-size: 11px; color: var(--accent); border-color: rgba(38,166,154,0.45); animation: pop-in .18s ease-out both; }
+kbd {
+  font: 600 10.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  background: rgba(127,127,127,0.12);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+
+/* ---- floating selection toolbar ----------------------------------------- */
+.seltb {
+  position: absolute; left: 0; top: 0;
+  z-index: 20;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+  /* Opacity only. The position is written every frame from the box event and
+     must never lag behind the drawing, so transform is deliberately absent. */
+  transition: opacity .16s;
+}
+.seltb.show { opacity: 1; }
+.seltb.show .seltb-in { pointer-events: auto; }
+.seltb.busy { opacity: .25; }
+.seltb.busy .seltb-in { pointer-events: none; }
+
+.seltb-in {
+  display: flex; align-items: center; gap: 2px;
+  padding: 4px;
+  max-width: calc(100vw - 16px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.38);
+  transform: translateY(6px) scale(.96);
+  transform-origin: 50% 100%;
+  transition: transform .22s cubic-bezier(.3,1.3,.5,1);
+}
+.seltb-in::-webkit-scrollbar { display: none; }
+.seltb.show .seltb-in { transform: none; }
+
+.sw-row { display: flex; align-items: center; gap: 5px; padding: 0 6px; }
+.sw {
+  width: 16px; height: 16px; padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(127,127,127,0.4);
+  cursor: pointer;
+  transition: transform .12s, box-shadow .12s;
+}
+.sw:hover { transform: scale(1.18); }
+.sw.on { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--text); }
+.sw-theme { background: linear-gradient(135deg, #e6e9ef 50%, #1b2230 50%); }
+
+.tb-btn {
+  width: 28px; height: 28px; flex-shrink: 0;
+  display: inline-grid; place-items: center;
+  border: 0; border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color .15s, background .15s, transform .1s;
+}
+.tb-btn:hover { color: var(--text); background: rgba(127,127,127,0.14); }
+.tb-btn:active { transform: scale(.92); }
+.tb-btn.on { color: var(--accent); background: rgba(38,166,154,0.12); }
+.tb-danger:hover { color: var(--down); background: rgba(239,83,80,0.12); }
+.tb-sep { width: 1px; height: 18px; flex-shrink: 0; background: var(--border); margin: 0 3px; }
+.wbar { display: block; width: 16px; border-radius: 2px; background: currentColor; }
+.tb-read {
+  min-width: 20px; text-align: center;
+  font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* ---- context menu ------------------------------------------------------- */
+.cm {
+  position: absolute; left: 0; top: 0;
+  z-index: 40;
+  min-width: 186px;
+  padding: 5px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 18px 44px rgba(0,0,0,0.45);
+  animation: pop-in .14s ease-out both;
+}
+.cm-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 6px 9px 7px;
+  font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.cm-head em {
+  font-style: normal; font-weight: 600;
+  text-transform: none; letter-spacing: 0;
+  color: var(--accent);
+}
+.cm-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  font: inherit; font-size: 12.5px; text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0; border-radius: 7px;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.cm-item:hover { background: rgba(127,127,127,0.14); }
+.cm-item .ic { color: var(--muted); transition: color .12s; }
+.cm-danger:hover { background: rgba(239,83,80,0.14); color: var(--down); }
+.cm-danger:hover .ic { color: var(--down); }
+.cm-sep { display: block; height: 1px; margin: 5px 4px; background: var(--border); }
+
+/* ---- notice ------------------------------------------------------------- */
+.notice {
+  position: absolute; left: 12px; bottom: 12px;
+  z-index: 30;
+  max-width: min(580px, calc(100% - 24px));
+  padding: 9px 10px 9px 13px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgba(0,0,0,0.4);
+  font-size: 12.5px; line-height: 1.5;
+  animation: notice-in .24s cubic-bezier(.3,1.3,.5,1) both;
+}
+@keyframes notice-in { from { opacity: 0; translate: 0 8px; } }
+.notice-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.notice-list {
+  margin-top: 7px; padding-top: 7px;
+  border-top: 1px solid var(--border);
+  list-style: none;
+  display: flex; flex-direction: column; gap: 3px;
+  font-size: 12px; color: var(--muted);
+}
+.notice-list b { color: var(--accent); font-weight: 650; }
+.notice-list b.bad { color: var(--down); }
+
+/* ---- inspector dock ----------------------------------------------------- */
+.dock {
+  flex-shrink: 0;
+  width: 0;
+  overflow: hidden;
+  background: var(--panel);
+  border-left: 1px solid transparent;
+  transition: width .3s cubic-bezier(.3,.9,.3,1), border-color .2s;
+}
+.dock.open { width: 340px; border-left-color: var(--border); }
+.dock-in { width: 340px; height: 100%; display: flex; flex-direction: column; }
+
+.dock-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 8px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+.dock-tabs { display: flex; gap: 2px; }
+.dock-tab {
+  font: inherit; font-size: 12px; font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: 0; border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.dock-tab:hover { color: var(--text); }
+.dock-tab.on { color: var(--text); border-bottom-color: var(--accent); }
+.dock-tab i { font-style: normal; font-size: 10px; margin-left: 6px; color: var(--accent); }
+
+.dock-x {
+  width: 24px; height: 24px; flex-shrink: 0;
+  display: inline-grid; place-items: center;
+  border: 0; border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.dock-x:hover { color: var(--text); background: rgba(127,127,127,0.14); }
+
+.dock-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
+.dock-empty { font-size: 12.5px; line-height: 1.65; color: var(--muted); }
+.dock-note { margin-bottom: 8px; font-size: 11.5px; color: var(--muted); }
+.dock code, .notice code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--accent);
+}
+.json {
+  font: 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  white-space: pre;
+  tab-size: 2;
+}
+.dock-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.evlog {
+  list-style: none;
+  display: flex; flex-direction: column;
+  font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.evlog li {
+  display: grid; grid-template-columns: 38px 86px 1fr; gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(127,127,127,0.12);
+  animation: ev-in .22s ease-out both;
+}
+@keyframes ev-in { from { opacity: 0; translate: 0 -4px; } }
+.ev-t { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ev { font-weight: 650; }
+.ev-x { color: var(--text); overflow-wrap: anywhere; }
+.ev-change { color: #26a69a; }
+.ev-select { color: #6ea8fe; }
+.ev-tool { color: #f5a524; }
+.ev-history { color: #c084fc; }
+.ev-edit, .ev-contextmenu { color: #ef5350; }
+
+/* ---- phones ------------------------------------------------------------- */
+@media (max-width: 1100px) {
+  .live { display: none; }
+}
+
+@media (max-width: 760px) {
+  .stage { flex-direction: column; }
+  .rail-wrap { width: 100%; }
+  .rail {
+    width: 100%; height: calc(var(--rb) + 14px);
+    border-right: 0; border-bottom: 1px solid var(--border);
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .rail-inner {
+    flex-direction: row;
+    width: max-content; min-width: 100%; min-height: 0;
+    padding: 6px 10px; gap: 2px;
+  }
+  .rail-sep { width: 1px; height: 22px; margin: 0 5px; }
+  .dbar { padding: 6px 10px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .dock {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 50;
+    width: 100%; height: 0;
+    border-left: 0; border-top: 1px solid transparent;
+    transition: height .3s cubic-bezier(.3,.9,.3,1), border-color .2s;
+  }
+  .dock.open { width: 100%; height: 50vh; border-left-color: transparent; border-top-color: var(--border); }
+  .dock-in { width: 100%; }
+  .kbds { display: none; }
+  .notice { left: 8px; right: 8px; bottom: 8px; max-width: none; }
+}
+
+@media (pointer: coarse) {
+  .rail { --rb: 40px; }
+  .tb-btn { width: 34px; height: 34px; }
+  .sw { width: 21px; height: 21px; }
+  .cm-item { padding: 10px 11px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-pill, .seltb, .seltb-in, .dock, .notice, .cm, .kbd-h, .chip-pop, .evlog li { transition: none; animation: none; }
 }
 
 /* ========================================================================= */
@@ -262,7 +739,7 @@ body.lock { overflow: hidden; }
 .lp-navlinks { display: flex; align-items: center; gap: 22px; }
 
 .lp-navlinks a {
-  font-size: 13px; color: var(--muted); text-decoration: none;
+  font-size: 13px; color: var(--muted); text-decoration: none; white-space: nowrap;
   transition: color .15s;
 }
 .lp-navlinks a:hover { color: var(--text); }
@@ -275,6 +752,14 @@ body.lock { overflow: hidden; }
   font-weight: 550;
 }
 .lp-navcta:hover { border-color: rgba(38,166,154,0.5); }
+
+/* eleven links and a button do not fit below ~1130px: tighten, then keep the two that matter most */
+@media (max-width: 1130px) {
+  .lp-navlinks { gap: 12px; }
+}
+@media (max-width: 940px) {
+  .lp-navlinks a:not(.lp-navcta):not([href='#features']):not([href='#drawings']) { display: none; }
+}
 
 /* ---- hero ---- */
 .lp-hero {
@@ -409,6 +894,7 @@ body.lock { overflow: hidden; }
 
 .lp-chartbar-title {
   margin-left: 8px;
+  white-space: nowrap;
   font-size: 11.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -1056,6 +1542,144 @@ body.lock { overflow: hidden; }
   background: #0a0e16;
 }
 
+
+/* ---- drawings section --------------------------------------------------- */
+
+/* the rail sits on top of the chart, inside the same window frame */
+.lp-drawstage { display: flex; flex-direction: column; }
+.lp-drawstage .rail {
+  width: 100%; height: calc(var(--rb) + 14px);
+  border-right: 0; border-bottom: 1px solid var(--border);
+  background: #0c1017;
+  overflow-x: auto; overflow-y: hidden;
+}
+.lp-drawstage .rail-inner {
+  flex-direction: row;
+  width: max-content; min-width: 100%; min-height: 0;
+  padding: 6px 12px; gap: 2px;
+}
+.lp-drawstage .rail-sep { width: 1px; height: 22px; margin: 0 5px; }
+.lp-drawstage .rail-btn:hover { background: rgba(255,255,255,0.06); }
+.lp-serieschip:disabled { opacity: .35; cursor: default; }
+.lp-serieschip:disabled:hover { color: var(--muted); border-color: var(--border); }
+.lp-serieschip .ic { flex-shrink: 0; }
+
+/* the hero's short rail lives on the title bar */
+.lp-chartbar-tools { padding-top: 6px; padding-bottom: 6px; min-height: 48px; }
+.lp-chartbar-tools .rail {
+  --rb: 32px;
+  width: auto; height: auto; margin-left: auto;
+  border: 0; background: transparent; overflow: visible;
+}
+.lp-chartbar-tools .rail-inner { flex-direction: row; padding: 0; min-height: 0; gap: 2px; }
+.lp-chartbar-tools .rail-sep { width: 1px; height: 18px; margin: 0 4px; }
+.lp-chartbar-tools .rail-btn:hover { background: rgba(255,255,255,0.06); }
+.lp-chart-hint b { color: var(--text); font-weight: 600; }
+
+/* ---- drawings demo ------------------------------------------------------- */
+/* a rail with a word under each glyph: one tool reads as a tool in two seconds */
+.rail-labeled .rail-btn {
+  width: auto; min-width: 56px; height: 52px; padding: 0 7px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+}
+.rail-lbl { font-size: 10.5px; font-weight: 580; letter-spacing: 0.01em; line-height: 1; white-space: nowrap; }
+.lp-drawstage .rail.rail-labeled { height: auto; }
+.lp-drawstage .rail-labeled .rail-inner { padding: 6px 10px; align-items: center; }
+.lp-drawstage .rail-labeled .rail-sep { height: 30px; }
+
+/* one slow pulse on the idle rail after the showreel: "it is your turn" */
+@keyframes rail-nudge { 0%, 100% { box-shadow: 0 0 0 0 rgba(38,166,154,0); } 50% { box-shadow: 0 0 0 3px rgba(38,166,154,0.16); } }
+.rail-nudge .rail-btn:not(.on):not(:first-child) { animation: rail-nudge 2.4s ease-in-out 3; animation-delay: calc(var(--n, 0) * 90ms); }
+.rail-nudge .rail-btn:nth-of-type(2) { --n: 1; }
+.rail-nudge .rail-btn:nth-of-type(3) { --n: 2; }
+.rail-nudge .rail-btn:nth-of-type(4) { --n: 3; }
+.rail-nudge .rail-btn:nth-of-type(5) { --n: 4; }
+.rail-nudge .rail-btn:nth-of-type(6) { --n: 5; }
+.rail-nudge .rail-btn:nth-of-type(7) { --n: 6; }
+
+.lp-showbtn {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  font: inherit; font-size: 11.5px; font-weight: 620;
+  color: #04120f;
+  background: linear-gradient(140deg, #35bdaf, var(--accent));
+  border: 0; border-radius: 999px;
+  padding: 5px 12px 5px 10px;
+  cursor: pointer;
+  transition: filter .15s;
+}
+.lp-showbtn:hover { filter: brightness(1.1); }
+.lp-showbtn:disabled { opacity: .5; cursor: default; }
+/* while it plays it is a status, not a control: a press falls through and takes over */
+.lp-showbtn.is-on { color: var(--accent); background: rgba(38,166,154,0.1); box-shadow: inset 0 0 0 1px rgba(38,166,154,0.4); pointer-events: none; }
+
+.lp-plotwrap { position: relative; }
+.lp-chart-draw { height: 380px; }
+
+/* the narration: one pill over the top-left of the plot, where the price scale leaves room */
+.lp-coach {
+  position: absolute; left: 12px; top: 12px; z-index: 5;
+  max-width: calc(100% - 92px);
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 7px 13px 7px 11px;
+  border: 1px solid rgba(38,166,154,0.4);
+  border-radius: 999px;
+  background: rgba(10,13,21,0.86);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  font-size: 12.5px; font-weight: 560; line-height: 1.35;
+  color: var(--text);
+  pointer-events: none;
+  opacity: 0; transform: translateY(-5px);
+  transition: opacity .25s, transform .25s;
+}
+.lp-coach.is-on { opacity: 1; transform: none; }
+.lp-coach-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--accent); animation: lp-pulse 2s infinite; }
+.lp-coach-t { animation: lp-coach-in .3s ease-out both; }
+@keyframes lp-coach-in { from { opacity: 0; transform: translateY(3px); } }
+.lp-coach-turn { border-color: rgba(245,165,36,0.5); }
+.lp-coach-turn .lp-coach-dot { background: #f5a524; box-shadow: 0 0 0 0 rgba(245,165,36,0.6); }
+
+.lp-drawhint { min-height: 62px; align-items: flex-start; }
+.lp-drawhint .lp-chart-hint { font-size: 12px; line-height: 1.6; }
+.lp-drawhint .lp-chart-hint b { color: var(--text); font-weight: 600; }
+.lp-drawhint kbd { font-size: 10px; padding: 0 5px; }
+.lp-drawhint .hint-t { display: none; }
+
+.lp-drawctl { min-height: 0; padding: 10px 12px; gap: 6px; }
+.lp-drawctl .lp-serieschip { font-size: 12px; padding: 5px 10px 5px 8px; }
+.lp-ctl-sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
+/* the readout: the change event, a receipt, or (while a drawing is in flight) the live stream */
+.lp-drawdemo .lp-annoread { min-height: 84px; }
+.lp-annoread-live { display: none; flex-direction: column; gap: 3px; }
+.lp-annoread.has-live { border-left-color: #f5a524; background: rgba(245,165,36,0.06); }
+.lp-annoread.has-live > .lp-annoread-t, .lp-annoread.has-live > .lp-annoread-s { display: none; }
+.lp-annoread.has-live > .lp-annoread-live { display: flex; }
+.lp-annoread-live .lp-annoread-t { font-variant-numeric: tabular-nums; }
+.lp-annoread-live .lp-annoread-s { color: #f5a524; }
+
+/* the right panel: the setup code, or the selected drawing as stored */
+.lp-drawcode { display: flex; flex-direction: column; align-self: stretch; contain: size; }
+.lp-drawcode pre { flex: 1; min-height: 0; max-height: none; overflow: auto; }
+.lp-codetabs { display: flex; gap: 4px; padding: 0 8px; }
+.lp-codetabs button {
+  font: inherit; font-size: 11px; font-weight: 600; letter-spacing: inherit; text-transform: inherit;
+  color: var(--muted); background: transparent; border: 0;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  padding: 10px 8px; cursor: pointer; transition: color .15s, border-color .15s;
+}
+.lp-codetabs button:hover { color: var(--text); }
+.lp-codetabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
+.lp-codenote {
+  padding: 12px 18px 0;
+  font-size: 12px; line-height: 1.6; color: var(--muted);
+}
+.lp-codenote code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--accent); }
+.lp-codenote + pre { padding-top: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-coach, .lp-coach-t, .lp-coach-dot, .rail-nudge .rail-btn { transition: none; animation: none; }
+}
+
 /* ---- responsive ---- */
 @media (max-width: 900px) {
   .lp-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1064,10 +1688,34 @@ body.lock { overflow: hidden; }
   .lp-annogrid { grid-template-columns: 1fr; }
   .lp-annofacts { grid-template-columns: 1fr; }
   .lp-annocode pre { max-height: none; }
+  /* stacked, the panel is as tall as what it holds (and the data view scrolls past 440px) */
+  .lp-drawcode { contain: none; }
+  .lp-drawcode pre { flex: none; max-height: 440px; }
+}
+
+/* touch and phone: one finger draws, so say so, and keep every tool a real target */
+@media (pointer: coarse), (max-width: 620px) {
+  .lp-drawhint .hint-m { display: none; }
+  .lp-drawhint .hint-t { display: inline; }
 }
 
 @media (max-width: 620px) {
   .lp-navlinks a:not(.lp-navcta) { display: none; }
+  /* the labelled rail wraps into a grid instead of scrolling tools out of sight */
+  .lp-drawstage .rail-labeled .rail-inner { flex-wrap: wrap; width: 100%; padding: 6px; gap: 4px; }
+  .lp-drawstage .rail-labeled .rail-sep { display: none; }
+  .rail-labeled .rail-btn { flex: 1 0 22%; height: 48px; min-width: 0; }
+  .lp-chart-draw { height: 300px; }
+  .lp-chartbar-tools .lp-dot, .lp-chartbar-tools .lp-chartbar-title { display: none; }
+  .lp-drawdemo .lp-dot { display: none; }
+  .lp-chartbar-tools .rail { width: 100%; margin-left: 0; }
+  .lp-chartbar-tools .rail-inner { width: 100%; justify-content: space-between; }
+  .lp-coach { max-width: calc(100% - 82px); font-size: 12px; }
+  .lp-drawhint { min-height: 66px; }
+  /* over the volume bars, not the price action, on a plot this small */
+  .lp-coach { top: auto; bottom: 36px; }
+  .lp-drawctl { gap: 6px; }
+  .lp-ctl-sep { display: none; }
   .lp-grid { grid-template-columns: 1fr; }
   .lp-section { padding-top: 64px; }
   .lp-chart { height: 320px; }

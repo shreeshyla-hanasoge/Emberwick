@@ -21,21 +21,10 @@ export class Layers {
       container.style.position = 'relative'
     }
 
-    names.forEach((name, i) => {
-      const c = document.createElement('canvas')
-      Object.assign(c.style, {
-        position: 'absolute',
-        left: '0',
-        top: '0',
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        zIndex: String(i + 1),
-      })
-      container.appendChild(c)
-      this.canvas[name] = c
-      this.ctx[name] = c.getContext('2d')
-    })
+    // A copy, built one canvas at a time: add() and remove() splice this
+    // array, and it must never be the caller's.
+    this.names = []
+    for (const name of names) this._create(name, this.names.length)
 
     this._ro = new ResizeObserver(() => this.measure())
     this._ro.observe(container)
@@ -77,6 +66,49 @@ export class Layers {
     this._onDpr = null
   }
 
+  /** Create a canvas at stack position `at` and renumber every zIndex. */
+  _create(name, at) {
+    const c = document.createElement('canvas')
+    Object.assign(c.style, {
+      position: 'absolute', left: '0', top: '0', width: '100%', height: '100%', pointerEvents: 'none',
+    })
+    this.container.appendChild(c)
+    this.canvas[name] = c
+    this.ctx[name] = c.getContext('2d')
+    this.names.splice(at, 0, name)
+    this.names.forEach((n, i) => { this.canvas[n].style.zIndex = String(i + 1) })
+  }
+
+  _size(n) {
+    const c = this.canvas[n]
+    c.width = Math.floor(this.width * this.dpr)
+    c.height = Math.floor(this.height * this.dpr)
+    this.ctx[n].setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
+  }
+
+  /**
+   * Add a canvas directly BELOW `before` (on top when absent). Idempotent.
+   * Sized immediately: measure() early-returns while the size is unchanged, so
+   * a canvas added after construction would otherwise stay 0x0 until a resize.
+   */
+  add(name, before) {
+    if (this.ctx[name]) return this.ctx[name]
+    const i = this.names.indexOf(before)
+    this._create(name, i < 0 ? this.names.length : i)
+    this._size(name)
+    return this.ctx[name]
+  }
+
+  remove(name) {
+    const c = this.canvas[name]
+    if (!c) return
+    c.remove()
+    delete this.canvas[name]
+    delete this.ctx[name]
+    this.names.splice(this.names.indexOf(name), 1)
+    this.names.forEach((n, i) => { this.canvas[n].style.zIndex = String(i + 1) })
+  }
+
   measure() {
     const r = this.container.getBoundingClientRect()
     const w = Math.max(1, Math.floor(r.width))
@@ -86,22 +118,24 @@ export class Layers {
     this.width = w
     this.height = h
     this.dpr = dpr
-    for (const n of this.names) {
-      const c = this.canvas[n]
-      c.width = Math.floor(w * dpr)
-      c.height = Math.floor(h * dpr)
-      this.ctx[n].setTransform(dpr, 0, 0, dpr, 0, 0)
-    }
+    for (const n of this.names) this._size(n)
     if (this.onResize) this.onResize(w, h)
   }
 
-  /** Flatten all layers into a single canvas (for toImage/export). */
-  composite() {
+  /**
+   * Flatten `names` (default: every layer) into one canvas. `between(c, name)`
+   * runs after each layer is drawn, so a caller can paint an export pass into
+   * the stack without touching the live canvases.
+   */
+  composite(names = this.names, between = null) {
     const out = document.createElement('canvas')
     out.width = Math.floor(this.width * this.dpr)
     out.height = Math.floor(this.height * this.dpr)
     const c = out.getContext('2d')
-    for (const n of this.names) c.drawImage(this.canvas[n], 0, 0)
+    for (const n of names) {
+      if (this.canvas[n]) c.drawImage(this.canvas[n], 0, 0)
+      if (between) between(c, n)
+    }
     return out
   }
 

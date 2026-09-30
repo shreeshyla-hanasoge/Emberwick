@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createChart, RandomFeed, defaultTheme, version } from '../chart/index.js'
+import { enableDrawings } from '../drawings/index.js'
 import BrandLogo from '../components/BrandLogo.jsx'
+import DrawingsShowcase from '../components/DrawingsDemo.jsx'
+import ToolRail from '../components/ToolRail.jsx'
+import { useDrawings } from '../components/useDrawings.js'
+import { pickScenes } from '../components/scenes.js'
 
 const NPM_URL = 'https://www.npmjs.com/package/emberwick'
 const CDN_URL = 'https://unpkg.com/emberwick/umd/emberwick.umd.js'
@@ -20,18 +25,55 @@ function spanLabel(r) {
   return `${h}h ${String(m).padStart(2, '0')}m on screen`
 }
 
+/** Tools on the hero's title bar: a short rail, so the chart reads as drawable without a toolbar's weight. */
+const HERO_RAIL = ['trendLine', 'fibRetracement', 'long', 'rectangle']
+
 function HeroChart() {
   const hostRef = useRef(null)
+  const wrapRef = useRef(null)
+  const feedRef = useRef(null)
+  const armedRef = useRef(false)
+  const seenRef = useRef(true)
   const [ready, setReady] = useState(false)
   const [range, setRange] = useState(null)
+  const [dc, setDc] = useState(null)
+  const [intro, setIntro] = useState(false)
+  const [tried, setTried] = useState(false)
+  const { tool } = useDrawings(dc)
+
+  // The live tape stops while a tool is armed (a line cannot be placed on a
+  // chart that scrolls away under the pointer) and while the hero is off screen
+  // (nobody is watching it, and the page has five more charts to run).
+  const syncFeed = () => {
+    const f = feedRef.current
+    if (f) f.setPaused(armedRef.current || !seenRef.current)
+  }
+
+  useEffect(() => {
+    armedRef.current = !!tool.tool
+    if (tool.tool) setTried(true)
+    syncFeed()
+  }, [tool.tool])
 
   useEffect(() => {
     let disposed = false
-    const chart = createChart(hostRef.current, {
+    const timers = []
+    const host = hostRef.current
+    const phone = host.clientWidth < 560
+    const spacing = phone ? 5 : 7
+    const offset = phone ? 10 : 14
+    // Bars of data in view, worked out from what the chart was made with:
+    // right after setFeed() the view is still easing in and visibleRange()
+    // would report the window it has reached so far.
+    const fits = Math.floor((host.clientWidth - 72) / spacing) - offset
+    const chart = createChart(host, {
       theme: { ...defaultTheme, background: '#0a0d15' },
       initialBars: 600,
-      timeScale: { spacing: 7, rightOffset: 14 },
+      timeScale: { spacing, rightOffset: offset },
     })
+    // Enabled right after the chart, destroyed before it: see Playground.
+    const d = enableDrawings(chart)
+    setDc(d)
     const feed = new RandomFeed({
       symbol: 'EMBR',
       timeframe: 60000,
@@ -40,6 +82,7 @@ function HeroChart() {
       ticksPerSecond: 10,
       speed: 40,
     })
+    feedRef.current = feed
 
     // The readout below is the 'visibleRange' event, unfiltered: it is called
     // once immediately with the current window and then only when that window
@@ -48,30 +91,69 @@ function HeroChart() {
       if (!disposed) setRange(r)
     })
 
-    chart.setFeed(feed).then(() => { if (!disposed) setReady(true) })
+    // Before the first frame is seen the page is not "off screen", it is unseen
+    // yet: the observer below settles it.
+    let io = null
+    if (typeof IntersectionObserver !== 'undefined') {
+      io = new IntersectionObserver(([e]) => {
+        seenRef.current = e.isIntersecting
+        syncFeed()
+      })
+      io.observe(wrapRef.current)
+    }
+
+    chart.setFeed(feed).then(() => {
+      if (disposed) return
+      setReady(true)
+      syncFeed()
+
+      // A trend line and a fib found in the bars just loaded, put on one after
+      // another as if drawn: the same add(..., { animate: true }) your code has.
+      // It gives way the moment the reader picks a tool or presses the chart.
+      const scene = pickScenes(chart.bars, { window: Math.max(30, Math.min(140, fits - 6)) })
+      // a trend line and a fib: the position and its four labels are in the
+      // drawings section, where there is room to read them
+      const rows = [scene.trend, scene.fib].filter(Boolean)
+      const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+      const stop = () => { timers.forEach(clearTimeout); timers.length = 0 }
+      host.addEventListener('pointerdown', stop, { once: true, capture: true })
+      rows.forEach((row, i) => {
+        timers.push(setTimeout(() => {
+          if (disposed || armedRef.current) return
+          try { d.add(row, { history: false, animate: !reduced }) } catch (e) { /* a repeat id: skip it */ }
+          if (i === rows.length - 1) setIntro(true)
+        }, reduced ? 0 : 900 + i * 900))
+      })
+    })
 
     return () => {
       disposed = true
+      timers.forEach(clearTimeout)
+      if (io) io.disconnect()
       offRange()
+      d.destroy()
       feed.destroy()
       chart.destroy()
+      feedRef.current = null
     }
   }, [])
 
   return (
-    <div className="lp-chartwrap">
-      <div className="lp-chartbar">
+    <div className="lp-chartwrap" ref={wrapRef}>
+      <div className="lp-chartbar lp-chartbar-tools">
         <span className="lp-dot lp-dot-a" />
         <span className="lp-dot lp-dot-b" />
         <span className="lp-dot lp-dot-c" />
-        <span className="lp-chartbar-title">EMBR · 1m · live</span>
+        <span className="lp-chartbar-title">EMBR · 1m · {tool.tool ? 'paused while you draw' : 'live'}</span>
+        <ToolRail dc={dc} tool={tool} names={HERO_RAIL} orientation="horizontal" className={`rail-bar${intro && !tried ? ' rail-nudge' : ''}`} />
       </div>
       <div className="lp-chart" ref={hostRef}>
         {!ready && <div className="lp-chart-loading">generating market…</div>}
       </div>
       <div className="lp-chartfoot">
         <p className="lp-chart-hint">
-          drag to pan — throw it and it glides · wheel to zoom · double-click to reset
+          drag to pan — throw it and it glides · wheel to zoom · double-click to reset ·{' '}
+          <b>draw on it with the tools above</b>
         </p>
         {range && range.barCount > 0 && (
           <span className="lp-rangeread" title="live payload from subscribe('visibleRange')">
@@ -395,7 +477,7 @@ function SeriesChart() {
  * instruments never trade through.
  */
 /** The release whose tag is accented. Everything else reads "since". */
-const CURRENT_RELEASE = '0.10.0'
+const CURRENT_RELEASE = '0.12.0'
 
 const ZONES = [
   { id: 'Asia/Kolkata', label: 'Mumbai' },
@@ -779,7 +861,7 @@ function CopyLine({ text }) {
 }
 
 const STATS = [
-  { v: '15.8', u: 'KB', l: 'gzipped UMD core' },
+  { v: '20.3', u: 'KB', l: 'gzipped UMD core' },
   { v: '0', u: '', l: 'dependencies' },
   { v: '60', u: 'fps', l: 'with a live feed' },
   { v: 'MIT', u: '', l: 'licensed' },
@@ -791,6 +873,22 @@ const SHAPES = [
 ]
 
 const FEATURES = [
+  {
+    t: 'Drawing tools',
+    d: 'Trendlines, rays, channels, rectangles, Fibonacci, measure, long and short positions and text, anchored to time and price so they hold through zoom, pan, reloads and history prepends. A separate entry: a chart that never imports it carries none of the code.',
+  },
+  {
+    t: 'Saved as data',
+    d: 'getDrawings() returns plain JSON, one row per drawing with its own schema version, and setDrawings() loads it back with a report of what it kept, renamed, rejected and carried. A row from a newer build is written back untouched, never destroyed.',
+  },
+  {
+    t: 'Drawn with a finger',
+    d: 'Tap to select, then drag by a handle. One finger draws while a tool is armed, two fingers pan and pinch, and a fill never steals a swipe, so a phone-sized chart stays scrollable however many boxes are on it.',
+  },
+  {
+    t: 'A plugin seam',
+    d: 'chart.addPlugin() gives an opt-in layer its own canvas and the first offer of every gesture. Drawings are built on it, so can yours be. Experimental, and measured: +4.2 KB gzipped in the core ESM, and nothing at all while no plugin is attached.',
+  },
   {
     t: 'Motion, not repaints',
     d: 'Every incoming tick eases into the forming candle over ~55ms. The price axis glides to new bounds instead of snapping. Zoom is cursor-anchored and eased; panning carries inertia and decays with friction.',
@@ -966,7 +1064,7 @@ function RangeChart() {
 
 const ROADMAP = [
   { t: 'Indicator library', d: 'SMA, EMA, VWAP, RSI and MACD as first-class calls on top of series and panes \u2014 plus resizable, reorderable panes and a plugin hook for your own.', next: true },
-  { t: 'Drawing tools', d: 'Trendlines, Fibonacci, position tool — with hit-testing, undo/redo and serialisable state.' },
+  { t: 'More drawing tools', d: 'Brush, callouts, pitchfork, Gann and fib extensions; multi-select; edge auto-pan while a drag runs off the plot; alerts on a drawing\u2019s price (priceAt() is the building block).' },
   { t: 'Chart-type morphing', d: 'Animate candlestick → Heikin-Ashi → line as an eased transition rather than a redraw.' },
   { t: 'Session gaps', d: 'Collapse weekends and closed sessions instead of rendering them as ordinary bar steps.' },
 ]
@@ -985,6 +1083,7 @@ export default function Landing() {
         </a>
         <nav className="lp-navlinks">
           <a href="#features">Features</a>
+          <a href="#drawings">Drawings</a>
           <a href="#panes">Panes</a>
           <a href="#view">Sessions</a>
           <a href="#series">Series</a>
@@ -1001,7 +1100,7 @@ export default function Landing() {
       {/* ---- hero ---- */}
       <section className="lp-hero">
         <span className="lp-pill">
-          <span className="lp-pulse" /> new in v0.9.0 — indicator panes
+          <span className="lp-pulse" /> new in v{CURRENT_RELEASE} — drawing tools
         </span>
         <h1>
           Candlestick charts that
@@ -1010,7 +1109,7 @@ export default function Landing() {
         </h1>
         <p className="lp-sub">
           A canvas charting core for financial frontends. Ticks ease in, axes glide,
-          panning carries momentum — and the whole thing is 15.8&nbsp;KB gzipped with
+          panning carries momentum — and the core is 20.3&nbsp;KB gzipped with
           zero dependencies. Plug in your own data feed and drop it into any stack.
         </p>
 
@@ -1058,6 +1157,81 @@ export default function Landing() {
       {/* Feature sections run NEWEST FIRST, so the version tags descend as you
           scroll and the current release is the first one you meet. Only the
           newest carries an accent tag; see VersionTag. */}
+      {/* ---- drawings ---- */}
+      <section className="lp-section" id="drawings">
+        <VersionTag v="0.12.0" />
+        <h2>Draw, and it stays drawn</h2>
+        <p className="lp-lede">
+          Smart: it snaps to the candle you mean, reads the bars for a position&rsquo;s
+          outcome, and hands you its state as plain data. Liquid: it glides, stays
+          pinned to time and price through a reload or a history prepend, and undo
+          glides back instead of jumping. It draws itself below. Pick a tool and take
+          over.
+        </p>
+
+        <DrawingsShowcase />
+
+        <div className="lp-annofacts">
+          <div className="lp-annofact">
+            <h3>Snaps where you mean</h3>
+            <p>
+              To a candle&rsquo;s open, high, low or close with the crosshair&rsquo;s
+              own magnet and reach, to other drawings&rsquo; anchors, to fib levels
+              and price lines. Drag a line and the readout under the chart says what
+              it landed on. <code>Shift</code> holds 45&deg;, <code>Alt</code> frees
+              the point, <code>Ctrl</code>/<code>&#8984;</code> flips the magnet.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Reads the bars</h3>
+            <p>
+              A long is entry, target and stop, and its label reads R:R. Once the
+              bars after the entry reach the target or the stop it says which, and
+              a stop on the wrong side turns both zones magenta instead of being
+              quietly corrected. Only revealed bars are read, so a replay never
+              leaks the outcome early.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Pinned to time and price</h3>
+            <p>
+              An anchor is <code>{'{ time, price }'}</code>. A point past the
+              newest bar is stored as a bar count from it, so it survives session
+              gaps and appended bars. Zoom, pan, <code>setData</code>, a history
+              prepend and replay all leave it where it was. The receipt under the
+              demo is measured, not asserted.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Undo you can watch</h3>
+            <p>
+              Undo is per drawing, so it never clobbers an edit to another one, and
+              what it restores glides back instead of jumping. The motion is in
+              data space, so it stays glued to the candles even if you zoom
+              mid-glide, and it honours reduced motion.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Saved as data</h3>
+            <p>
+              One plain JSON row per drawing, each with its own schema version.
+              <code>setDrawings()</code> loads them back with a report of what it
+              kept, renamed, rejected and carried, and a row from a newer build is
+              written back untouched. Open the second tab above to read one.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Nothing until you import it</h3>
+            <p>
+              <code>emberwick/drawings</code> is its own entry. The core entry is
+              byte-identical with or without it; the generic plugin seam is +4.2&nbsp;KB
+              gzipped in the core ESM. The drawings themselves are 52.8&nbsp;KB
+              gzipped as a minified UMD (71.9&nbsp;KB as unminified ESM), and only
+              when you import them.
+            </p>
+          </div>
+        </div>
+      </section>
       {/* ---- panes ---- */}
       <section className="lp-section" id="panes">
         <VersionTag v="0.9.0" />

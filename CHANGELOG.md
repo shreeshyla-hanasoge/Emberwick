@@ -3,6 +3,234 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-09-30
+
+**Draw on the chart.** Trendlines, levels, Fibonacci, channels, ranges and
+positions: pinned to time and price, snapped where you mean, undoable, and
+absent from your bundle until you import them.
+
+### Added
+
+- **Drawing tools (#9)**, in a new entry, `emberwick/drawings`.
+
+  ```js
+  import { createChart } from 'emberwick'
+  import { enableDrawings } from 'emberwick/drawings'
+
+  const drawings = enableDrawings(createChart(el))
+  drawings.setTool('fibRetracement')
+  drawings.subscribe('change', () => save(drawings.getDrawings()))
+  ```
+
+  Decisions worth recording, each of which cost an alternative:
+
+  - **The tool set, and why.** Nine stored types and fourteen presets:
+    `trendLine` (with `ray`, `extendedLine` and `arrow`), `horizontalLine`
+    (with `horizontalRay`), `verticalLine`, `rectangle`, `parallelChannel`,
+    `fibRetracement`, `measure`, `position` (`long` and `short`) and `text`.
+    Issue #9 asked for the trend line, the horizontal line and Fibonacci; the rest are cheap once the
+    framework exists, and `measure` and `position` matter directly to an
+    R-multiple backtest review. A variant is a preset over a shared type, so a
+    reader can turn a ray back into a segment and a host stores one kind of
+    row. Brush, callout, pitchfork, Gann, fib extension and time zones are
+    deliberately deferred: each is a new geometry for a minority of users.
+  - **Anchors are `{ time, price }`, and a future point is a bar count.** A
+    point past the newest bar is stored as `{ time: lastBarTime, price, offset:
+    k, tf }`, "k bars after"; one before the oldest bar is the mirror image.
+    Pixel or index anchors would drift the moment history is paged in; a raw
+    future timestamp would be wrong across every session gap. Offsets keep
+    "five bars away" true across gaps and prepends, and `tf` rescales them when
+    the timeframe changes. No new scale system: a time resolves to a
+    fractional bar index and goes through the same `ts.x` and `ps.y` as the
+    candles.
+  - **Opt-in, with the measured sizes.** No drawing code is in the core, and CI
+    proves the core entry is byte-identical with and without the drawings
+    entry. The drawings are 71.9 KB gzipped as unminified ESM and 52.8 KB as
+    the minified UMD (`emberwick-drawings.umd.js`, global `EmberwickDrawings`,
+    loaded after the core), and only when imported. That is a large number
+    next to a 20 KB core; `createDrawings(chart, { tools })` lets a bundler
+    drop the tools you do not name, and takes no default set precisely so it
+    can.
+  - **Touch rules, and why tap-to-select.** On a phone a finger cannot hover
+    and a selected box is mostly fill, so a press on an unselected drawing is
+    left to the chart (pan, scrub or tap), a tap selects, and only then does a
+    drag on a handle, border, label or move handle claim the press. A fill
+    never claims a one-finger press: a swipe over a box pans. With a tool armed
+    one finger draws and two pan. Without this, a chart with three boxes on it
+    could not be scrolled with a thumb. Handles are a 44 pt target.
+  - **Snapping, and magnet parity with the crosshair.** The first of Alt (free),
+    Shift (0/45/90°), another drawing's anchor, a level (horizontal lines, fib
+    levels, position prices, price lines, the channel's auto-fit), the OHLC
+    magnet and the bar slot wins. The magnet is `'inherit'` by default:
+    it follows `chart.options.magnet` with the crosshair's own reach (22 px), so
+    one setting drives both and a snapped drawing lands where the crosshair
+    said. The platform modifier (`Cmd` on macOS, `Ctrl` elsewhere, because
+    Ctrl+click is a secondary click on a Mac) inverts it for one gesture. A
+    snap, once engaged, releases only past 1.5 times its reach.
+  - **The glue rule.** Anchors never move. A drawing is projected every frame
+    through the same scales as the candles, and what glides is a *residual* in
+    data space (bars and price) that decays to zero. Because it lives in data
+    units it stays glued if the view zooms mid-glide, and it stops the loop as
+    soon as it is under 0.1 px. Dragging is the exception and is crisp: a
+    bar-slot change or a per-bar magnet change never glides, because a glide
+    would trail the pointer by its time constant, and the house rule is that a
+    drag jumps.
+  - **`change` versus `drawing`.** `change` fires once per commit (the end of a
+    gesture, an API call, an undo) with `created`, `updated` and `removed`, and
+    is what a save-on-change host subscribes to. `drawing` is a stream at frame
+    rate while a draft changes, with live stats, for readouts such as R:R while
+    dragging. Conflating them would make either a per-frame save or a
+    once-per-gesture readout. A third, state event, `box`, reports the selected
+    drawing's painted box for floating toolbars, because none of pan, zoom or an
+    autoscale ease changes `visibleRange`.
+  - **Load versus edit.** `setDrawings` is a load: it clears history and
+    selection, aborts a gesture and fires **no `change`**, and returns a
+    `LoadReport` (`loaded`, `carried`, `rejected`, `renamed`, `truncated`,
+    `orphaned`), also kept as `lastLoadReport`. If a load emitted `change`, a
+    save-on-change host would write a half-loaded document back over the stored
+    one. A string that does not parse throws and applies nothing.
+  - **Per-id undo.** A history entry records only the ids it changed, as frozen
+    before and after states, so undoing one drawing never clobbers an edit to
+    another or an edit made with `{ history: false }`. `batch(fn)` is atomic:
+    one entry and one `change`, or on a throw nothing at all.
+  - **Inert preservation.** A row with an unknown `type`, or a `v` newer than
+    this build, is carried verbatim and returned by `getDrawings()` in its z
+    slot. Within a known `v`, unknown keys (top level, `style`, `options`) are
+    carried too and survive an `update()`. `remove()` and `clear()` skip inert
+    rows and do not count them. An older build must never destroy a newer
+    build's data, least of all through a save-on-change host. Additive fields
+    keep `v`; only a change an older build would misread bumps it.
+  - **Replay against the source tape.** Anchors resolve against the replay's
+    whole dataset, keyed on the `Replay` object, so seeking or stepping never
+    moves or re-resolves a drawing, and marks past the cursor stay visible.
+    Everything that reads price or volume (the magnet, a position's outcome,
+    a measure's volume) sees revealed bars only, so a position flips to
+    "Target hit" on the step that reveals it.
+
+  Also: drawings take a `pane` (a horizontal line at RSI 70 is a drawing on the
+  `'rsi'` pane); a position tool that reports a wrong-side stop instead of
+  correcting it; a locked drawing that the chart pans through and a tap still
+  selects; fills that yield to trade markers; and text that is a draft until its
+  first non-empty commit, so a save-on-change host never has to delete a row it
+  was just handed. The demo site's Playground exercises all of it.
+
+- **`chart.addPlugin(plugin)` and `chart.removePlugin(plugin)`** (experimental).
+  A small, generic seam: an opt-in layer gets its own `plugins` canvas between
+  `main` and `overlay`, the first offer of every gesture, a per-frame `tick` and
+  `draw`, and a `host` with live getters. Drawings are built on it and nothing
+  else gets private access.
+
+  The alternatives were each worse. Drawing on `overlay` loses to the
+  crosshair, which clears it on every pointer move. Drawing on `main` would
+  repaint every candle to drag a line. Monkey-patching the handlers cannot be
+  made correct, because the gesture state (`dragging`, `touchMode`, `moved`,
+  `pointers`) is local to `_bindEvents`, and `toImage` would miss the
+  result. A canvas per plugin is about 7 MB at 900×500 and a pixel ratio of 2.
+
+  It costs nothing without a plugin (three canvases, and a length check per
+  input hook), and the core entry stays free of drawing code. The seam measures
+  **+4.20 KB** gzipped in the core ESM (31.8 to 36.0 KB, unminified, with the
+  comments) and **+2.62 KB** in the minified UMD (17.7 to 20.3 KB). The estimate
+  was +2.6 KB for the ESM: the house-style comments in the gesture handling
+  are what the difference is made of. See the README's *Plugins (experimental)*
+  for the hooks, host fields, layer order and the keep-alive and error rules.
+
+- **`toNumber` and `DASH` are exported** from the core, so a plugin coerces input
+  and names a dash exactly as the core does. `'dashed'` now means one thing
+  across price lines, series and drawings.
+
+- **Two-finger pan.** Two fingers that move together now pan as well as zoom.
+  This is the only way to reposition while a drawing tool is armed on touch,
+  where one finger draws, and it shipped first, as its own change, for that
+  reason: it alters behaviour for every touch user and had to be bisectable.
+
+### Fixed
+
+- **The first frame after idle took a dt of 64.** `Loop` left its last timestamp
+  stale while idle, so the first frame after any pause clamped to 64 ms: 63% of
+  a wheel-zoom ease and 27% of the candle-spawn tween in one step, and every
+  hover fade popped instead of easing. It is now one nominal frame. **Existing
+  motion changes slightly** as a result: eases that used to lurch on wake now
+  start gently.
+- **`setAnimate()` left `options.animate` stale**, so anything reading the
+  option after a runtime toggle (a plugin, in particular) saw the old value.
+- **A settling ease snapped its last step without redrawing the candles.**
+  `Smoothed` set its value to the target on the frame it detected it had
+  settled and reported no motion, so that frame was not a full repaint: the
+  candles stayed at the previous value while everything painted afterwards, the
+  crosshair included, projected through the snapped one. On a large dataset at
+  maximum zoom the two disagreed by up to about 3.6 px (the epsilon is relative
+  and the right edge is an absolute bar index). The snap frame is now drawn.
+  **Each ease costs one more frame**, and a test on a 29,000-bar chart pins a
+  plugin anchor to the candle's own x after a settle.
+- **A third finger during a pinch froze it and started a pan**, and the finger
+  left after a pinch drew a stray crosshair. A third finger is now ignored and
+  the remaining one keeps panning.
+- **A press whose `pointerup` was swallowed kept panning on hover.** A native
+  context menu or a modal can eat the up. A mouse or pen move that reports no
+  buttons held during a press, or a lost pointer capture, now ends that press.
+
+### Changed
+
+- **While a plugin is attached a fourth canvas exists**, and `overlay` moves from
+  z-index 3 to 4. This matters only to a host stacking its own elements inside
+  the chart container. A chart with no plugin is unchanged.
+- **The crosshair honours exact points** (and `tags: false`), so a plugin that
+  has already snapped a point gets the price it snapped to reported, not a `y`
+  round trip. A point a plugin sets from its `tick` lands in the same frame's
+  overlay, and the `'crosshair'` listeners run after the frame has drawn.
+- **`Layers.composite(names, between)`** takes optional arguments, and
+  **`toImage()` re-renders every layer synchronously from the current state
+  before exporting** when a plugin is attached, so an export cannot lag the
+  screen.
+- **Core size budgets** are now 37 KB for the ESM and 21 KB for the UMD, against
+  measured 36.0 and 20.3. The ESM budget was 36 while the seam was estimated
+  at +2.6 KB; it measured +4.2 KB and was raised one kilobyte, not waved
+  through. The drawings entry has its own budgets (85 KB ESM, 63 KB UMD), each
+  1.2 times what was measured.
+
+### Package
+
+- **`emberwick/drawings`** (`drawings.js`, `drawings.d.ts`) and the drawings UMD
+  (`umd/emberwick-drawings.umd.js`, global `EmberwickDrawings`, which reads
+  `window.Emberwick` and says to load the core first if it is missing).
+- **CI proves the core entry is byte-identical with and without drawings**:
+  `index.js` and its source map from a core-only build against the full build.
+- **`verify:package` fails on a `chunks/` directory**, which is how Rollup
+  splits the core when the two entries share a deep import, and checks that the
+  drawings UMD works under a CommonJS `require`.
+- **`npm test` enforces the source-level rules** for `src/drawings`: imports
+  only through `../chart/index.js`, no module-scope DOM access, and nothing
+  newer than ES2019 that the build cannot lower.
+
+### Documentation
+
+- README: a *Drawing tools* section (enabling, the tool and preset table, mouse,
+  phone and keyboard tables, snapping, saving and loading with the schema and
+  the `LoadReport`, how anchors follow your data, undo, events, styling, motion,
+  custom tools, framework recipes and the size, stated plainly) and a *Plugins
+  (experimental)* section; the drawings entry point and CDN snippet; new
+  Interaction rules; the Known gaps list.
+- **The README's vendoring section was wrong and is corrected.** It said
+  `src/chart/` imports nothing outside itself. `render/watermark.js` imports
+  `src/brand.js`, so a folder copied on its own does not resolve. The section
+  now says so and names the file; the import itself is unchanged in this
+  release.
+- The landing page's "15.8 KB gzipped UMD core" was stale by three releases; it
+  is now the measured 20.3 KB. The Playground gained the drawing tools: a
+  tool rail read off `TOOL_PRESETS`, a floating selection toolbar driven by the
+  `box` event, a right-click menu, snap and undo controls, save and load, a
+  load-report view, a 500-drawing button and an inspector and event log.
+
+### Notes
+
+- Drawings are experimental in 0.x: the plugin API and the `ToolDef` contract
+  are the parts most likely to change before 1.0. The stored schema is not:
+  it is versioned per drawing from the start, and unknown keys are carried.
+- Known gaps, unchanged by this release and listed in the README: single
+  selection, no edge auto-pan, no alerts, no templates, plain-text only,
+  drawings are not keyed by symbol and do not influence autoscale.
+
 ## [0.11.0] — 2026-09-25
 
 **The crosshair works on a phone.** Tap a bar to read it, long-press to scrub

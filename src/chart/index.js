@@ -18,6 +18,10 @@ export { Smoothed, Tween, easeOutCubic, easeInOutCubic } from './motion/Tween.js
 export { Inertia } from './motion/Inertia.js'
 export { LiveCandle } from './motion/LiveCandle.js'
 export { Replay, MIN_SPEED, MAX_SPEED } from './replay/Replay.js'
+/** The one coercion every Emberwick input goes through — shared so plugins agree with the core. */
+export { toNumber } from './core/formatters.js'
+/** So 'dashed' means one thing across price lines, series and drawings. */
+export { DASH } from './render/style.js'
 
 import { Chart } from './core/Chart.js'
 
@@ -26,5 +30,5 @@ export function createChart(container, options) {
   return new Chart(container, options)
 }
 
-export const version = '0.11.0'
+export const version = '0.12.0'
 

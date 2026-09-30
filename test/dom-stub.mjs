@@ -15,6 +15,11 @@ const noop = () => {}
  * theme key do anything?" had no answer for twenty of them. Every method call
  * and every property assignment lands in `ops`, so a test can assert on the
  * fills and strokes a frame actually produced.
+ *
+ * There is deliberately no state stack: an unset property reads back as a
+ * recorder function, not as the value a real context would hold, so a test
+ * asserts on the ORDER of ops (save … restore, setLineDash([]) before a
+ * stroke) rather than on what the context would say its state is.
  */
 function makeCtx(ops) {
   const base = { measureText: () => ({ width: 10 }), canvas: null }
@@ -40,7 +45,40 @@ export function makeCanvas() {
     /** Everything drawn to this canvas, in order. */
     ops,
     getContext: () => makeCtx(ops),
+    /** Chart#toImage ends here; a real PNG is the browser's business. */
+    toDataURL: () => 'data:image/png;base64,',
     remove: noop,
+  }
+}
+
+/**
+ * Any element that is not a canvas — the drawings text editor's <textarea>,
+ * mostly. Listeners are recorded so a test can dispatch to them, and focus is
+ * a flag, so "focused synchronously inside the handler" is assertable.
+ */
+export function makeElement(tag) {
+  return {
+    tagName: String(tag).toUpperCase(),
+    style: {},
+    value: '',
+    children: [],
+    listeners: new Map(),
+    addEventListener(t, fn) {
+      if (!this.listeners.has(t)) this.listeners.set(t, new Set())
+      this.listeners.get(t).add(fn)
+    },
+    removeEventListener(t, fn) {
+      const set = this.listeners.get(t)
+      if (set) set.delete(fn)
+    },
+    dispatch(t, ev) {
+      for (const fn of [...(this.listeners.get(t) || [])]) fn(ev)
+    },
+    focus() { this.focused = true },
+    blur() { this.focused = false; this.dispatch('blur', {}) },
+    remove() { this.removed = true },
+    setAttribute() {},
+    appendChild(c) { this.children.push(c) },
   }
 }
 
@@ -69,8 +107,25 @@ export function makeContainer({ width = 900, height = 500 } = {}) {
     children: [],
     getBoundingClientRect: () => ({ width, height, left: 0, top: 0 }),
     appendChild(c) { this.children.push(c) },
-    addEventListener: noop,
-    removeEventListener: noop,
+    /**
+     * Recorded, so a test can prove a listener was attached and removed, and
+     * reach one the handlers are not exposed for (a keyup, a blur). The core
+     * tests keep calling chart._onDown & co. directly.
+     */
+    listeners: new Map(),
+    addEventListener(t, fn) {
+      if (!this.listeners.has(t)) this.listeners.set(t, new Set())
+      this.listeners.get(t).add(fn)
+    },
+    removeEventListener(t, fn) {
+      const set = this.listeners.get(t)
+      if (set) set.delete(fn)
+    },
+    /** Call every listener recorded for `type`, as the browser would. */
+    dispatch(t, ev) {
+      for (const fn of [...(this.listeners.get(t) || [])]) fn(ev)
+    },
+    focus(opts) { this.focused = true; this.focusOpts = opts },
     // Chart captures the pointer on every pointerdown, so without these no
     // gesture handler is reachable from a test at all — the down path threw
     // before it classified anything.
@@ -87,7 +142,7 @@ export function installDom() {
   const saved = {}
   const set = (k, v) => { saved[k] = globalThis[k]; globalThis[k] = v }
 
-  set('document', { createElement: () => makeCanvas() })
+  set('document', { createElement: (tag) => (String(tag).toLowerCase() === 'canvas' ? makeCanvas() : makeElement(tag)) })
   set('getComputedStyle', () => ({ position: 'relative' }))
   set('ResizeObserver', class { observe() {} disconnect() {} })
   // A drivable matchMedia: `setDevicePixelRatio()` below fires the listeners
@@ -98,7 +153,9 @@ export function installDom() {
     matchMedia: (query) => {
       const mq = {
         media: query,
-        matches: true,
+        // Resolution queries match, so the DPR watcher arms as it always
+        // did; a reduced-motion query does not, so motion defaults to full.
+        matches: !/prefers-reduced-motion/.test(query),
         _listeners: new Set(),
         addEventListener(_type, fn, opts) {
           mq._once = !!(opts && opts.once)

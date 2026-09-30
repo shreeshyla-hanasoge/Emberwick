@@ -1,4 +1,4 @@
-import { createTimeFormatter, toNumber } from './formatters.js'
+import { createTimeFormatter, toNumber, priceTicks, decimalsFor } from './formatters.js'
 import { Layers } from './Layers.js'
 import { Loop } from './Loop.js'
 import { TimeScale } from './TimeScale.js'
@@ -228,6 +228,26 @@ export class Chart {
      */
     this._stickyCursor = false
     this._holdTimer = null
+    /**
+     * Opt-in plugins (addPlugin), in attach order; input is offered topmost
+     * (last attached) first. Empty on every chart that never enables one, and
+     * each hook below then costs that chart a single length check.
+     */
+    this._plugins = []
+    this._pluginInfo = { full: false, dt: 16, exporting: false }
+    /** { rec, pointerId } — the gesture a plugin claimed, or null. */
+    this._owner = null
+    /** { rec, cursor } — what a plugin reported under the hover point. */
+    this._pluginHit = null
+    this._cursorOverride = null
+    this._cursorCss = 'crosshair'
+    /**
+     * True while _frame runs. A plugin may move the crosshair from tick(); its
+     * listeners must still run AFTER the frame has drawn (a listener may call
+     * setData), so the emit is deferred to _crosshairPending.
+     */
+    this._inFrame = false
+    this._crosshairPending = false
 
     this.loop = new Loop(
       (dirty, dt) => this._frame(dirty, dt),
@@ -609,8 +629,44 @@ export class Chart {
     let lastY = 0
     let lastT = 0
     let moved = false
+    /**
+     * A plugin owned or consumed this gesture (`claimed`), and whether the one
+     * before it was (`prevClaimed`). A dblclick spans two presses, and either
+     * one belonging to a plugin — a fast click-click trendline — means the
+     * reader did not ask for a view reset.
+     */
+    let claimed = false
+    let prevClaimed = false
+    /**
+     * Tap detection (D27). `travel` is the farthest the pressed pointer got
+     * from its down point (Chebyshev, like the touch slop); a per-event delta
+     * cannot tell a slow pan from a still press. `cancelling` marks an up that
+     * is really a pointercancel. `swallowId` is a press a plugin handed back
+     * with release(): the rest of it only moves the raw crosshair.
+     */
+    let travel = 0
+    let downButton = 0
+    let downType = 'mouse'
+    /** pointerType of the last press; a DOM dblclick/contextmenu carries none. */
+    let lastType = 'mouse'
+    let cancelling = false
+    let swallowId = null
+    /** Closure-side so it can set swallowId; exposed like _dismissCrosshair. */
+    this._releaseOwner = () => {
+      const o = this._owner
+      if (!o) return
+      this._owner = null
+      swallowId = o.pointerId
+      this._cursorOverride = null
+      // What the plugin had under the pointer when the press began is stale:
+      // the rest of this press is the raw crosshair's, with no hover.
+      this._pluginHit = null
+      this._applyCursor()
+    }
     const pointers = new Map()
     let pinchDist = 0
+    /** Midpoint of the pinch pair on the previous move; null until one is seen. */
+    let pinchMid = null
 
     /**
      * Touch gesture state.
@@ -667,9 +723,20 @@ export class Chart {
 
     this._onDown = (e) => {
       pointers.set(e.pointerId, localPos(e))
+      // A third finger (a palm, a stray finger on a tablet) joins nothing: the
+      // pinch keeps its first two, and the extra finger starts no gesture of
+      // its own. In 0.11 it fell through and started a pan.
+      if (pointers.size > 2) return
       if (pointers.size === 2) {
+        // A second finger is a pinch, whoever owned the first. The plugin
+        // reverts its gesture; a half-dragged handle must not stay behind. A
+        // released press stops being swallowed: the pinch (and the finger it
+        // leaves behind, which keeps panning) now owns the pointers.
+        this._cancelOwner()
+        swallowId = null
         const [a, b] = [...pointers.values()]
         pinchDist = Math.hypot(a.x - b.x, a.y - b.y)
+        pinchMid = null
         dragging = false
         // A second finger means zoom, which is a statement about the view
         // rather than about one bar. Drop any crosshair the first finger
@@ -680,11 +747,44 @@ export class Chart {
         return
       }
       const p = localPos(e)
+      // A down while a plugin still owns a gesture means its up never came (a
+      // context menu, an alert(), a breakpoint). End that gesture first, or
+      // the plugin receives a press in the middle of a drag.
+      if (this._owner) this._cancelOwner()
+      swallowId = null
+      downX = p.x
+      downY = p.y
+      downButton = e.button || 0
+      downType = lastType = e.pointerType || 'mouse'
+      travel = 0
+      prevClaimed = claimed
+      claimed = false
+      if (this._plugins.length) {
+        const rec = this._offer('pointerDown', this._pointer(e, p))
+        if (rec) {
+          // Owned by a plugin: none of the core's gestures may start. Inertia
+          // stops too, or a coasting chart slides the data-anchored drawing out
+          // from under the finger that just grabbed it.
+          this._owner = { rec, pointerId: e.pointerId }
+          claimed = true
+          dragging = false
+          mode = null
+          dragPane = null
+          touchMode = null
+          clearHold()
+          this.inertia.stop()
+          if (e.pointerType === 'touch') dismissCrosshair()
+          el.setPointerCapture(e.pointerId)
+          return
+        }
+      }
       dragging = true
       moved = false
       const target = this._classifyDrag(p.x, p.y)
       mode = target.mode
       dragPane = target.pane
+      // A highlight must not ride along on a pan the plugin did not claim.
+      if (this._plugins.length && mode === 'pan') this._hoverNone('pan')
       panDy = 0
       paneWasAuto = dragPane ? dragPane.ps.auto : true
       lastX = p.x
@@ -724,16 +824,71 @@ export class Chart {
       const p = localPos(e)
       if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p)
 
-      if (pointers.size === 2) {
-        const [a, b] = [...pointers.values()]
+      if (pointers.size >= 2) {
+        // The first two fingers ARE the pinch. `=== 2` froze it the moment a
+        // third touched down, and let the third steer a pan.
+        const it = pointers.keys()
+        const ia = it.next().value
+        const ib = it.next().value
+        if (e.pointerId !== ia && e.pointerId !== ib) return
+        const a = pointers.get(ia)
+        const b = pointers.get(ib)
         const d = Math.hypot(a.x - b.x, a.y - b.y)
-        if (pinchDist > 0 && d > 0) {
-          const mid = (a.x + b.x) / 2
-          this.ts.zoomAt(mid, d / pinchDist)
+        const mid = (a.x + b.x) / 2
+        // Two fingers pan as well as zoom: moving the pair moves the chart. It is
+        // the only way to reposition while one finger belongs to a drawing tool.
+        if (pinchMid !== null) {
+          this.ts.panBy(mid - pinchMid)
+          this.loop.invalidate('all')
+          this._maybeLoadHistory()
+        }
+        pinchMid = mid
+        if (pinchDist > 0 && d > 0 && this.ts.zoomAt(mid, d / pinchDist)) {
+          // A pinch is a drag, and drags jump(): panBy() above writes the
+          // right edge's value AND target, so an eased zoom would have its
+          // right-edge half thrown away by the very next move while the
+          // spacing went on easing — the pinch would slide off the fingers
+          // toward the right edge. Glued, the bar under the midpoint stays
+          // under it on every move.
+          this.ts._spacing.jump(this.ts._spacing.target)
+          this.ts._right.jump(this.ts._right.target)
           this.loop.invalidate('all')
         }
         pinchDist = d
         return
+      }
+      // A mouse or pen move with no button held while a press is live means
+      // the up went missing (a native context menu, a modal, a breakpoint).
+      // End the press as an up that is not a tap. Strict === 0: fake test
+      // events without `buttons` must keep routing. A released press counts
+      // too, or a lost up would leave every later hover swallowed.
+      if (e.pointerType !== 'touch' && e.buttons === 0 && pointers.has(e.pointerId) && (dragging || this._owner || e.pointerId === swallowId)) {
+        cancelling = true
+        try { this._onUp(e) } finally { cancelling = false }
+        return
+      }
+      if (e.pointerId === swallowId) {
+        // A press the plugin handed back (release()): it tracks the raw
+        // crosshair for the rest of its life and does nothing else.
+        if (e.pointerType !== 'touch') {
+          this.cursor = p
+          this._emitCrosshair(p)
+          this.loop.invalidate('overlay')
+        }
+        return
+      }
+      if (this._owner) {
+        // Only the owner's pointer, only to the owner. The crosshair is the
+        // plugin's to place during its gesture (host.setCrosshair), so it shows
+        // the SNAPPED point rather than the raw pointer.
+        if (e.pointerId === this._owner.pointerId) {
+          this._call(this._owner.rec, 'pointerMove', this._pointer(e, p))
+        }
+        return
+      }
+      if (dragging) {
+        const t = Math.max(Math.abs(p.x - downX), Math.abs(p.y - downY))
+        if (t > travel) travel = t
       }
 
       /**
@@ -764,8 +919,11 @@ export class Chart {
         return
       }
       if (touchMode !== 'pan') {
-        this.cursor = p
-        this._emitCrosshair(p)
+        const hov = !dragging && e.pointerType !== 'touch' && this._plugins.length
+          ? this._hover(this._pointer(e, p))
+          : null
+        this.cursor = (hov && hov.crosshair) || p
+        this._emitCrosshair(this.cursor)
         this.loop.invalidate('overlay')
       }
 
@@ -812,6 +970,7 @@ export class Chart {
      * unchanged, so -panDy is its exact inverse.
      */
     this._onCancel = (e) => {
+      if (this._owner && e.pointerId === this._owner.pointerId) this._cancelOwner()
       // The page is taking the gesture. Whatever the finger was saying, it
       // was not saying it to the chart.
       clearHold()
@@ -823,13 +982,81 @@ export class Chart {
         this.loop.invalidate('all')
       }
       panDy = 0
-      this._onUp(e)
+      // A cancelled press is never a tap, whatever it looked like so far. The
+      // up path still runs: it forgets the pointer (a stale entry would make
+      // the NEXT single finger count as a pinch) and releases capture.
+      cancelling = true
+      try { this._onUp(e) } finally { cancelling = false }
     }
 
     this._onUp = (e) => {
+      const wasPinch = pointers.size >= 2
       pointers.delete(e.pointerId)
-      if (pointers.size < 2) pinchDist = 0
+      if (pointers.size < 2) {
+        pinchDist = 0
+        pinchMid = null
+      } else {
+        // A finger left a 3-finger touch: re-seed from the pair that remains,
+        // or the next move zooms by the ratio against a pair that is gone.
+        const [a, b] = [...pointers.values()]
+        pinchDist = Math.hypot(a.x - b.x, a.y - b.y)
+        pinchMid = null
+      }
+      if (wasPinch) {
+        if (pointers.size === 1) {
+          // The finger left behind by a pinch carries on panning, as the pair
+          // was: a reader who lifts one finger of a zoom has not started a new
+          // gesture, and must not get a crosshair tracking the other one.
+          // Horizontal only (no dragPane): they never asked to take the pane
+          // out of autoscale. touchMode 'pan' also means it is never a tap.
+          const [rest] = pointers.values()
+          dragging = true
+          mode = 'pan'
+          dragPane = null
+          touchMode = 'pan'
+          moved = true
+          lastX = rest.x
+          lastY = rest.y
+          lastT = performance.now()
+        }
+        try { el.releasePointerCapture(e.pointerId) } catch (_) {}
+        return
+      }
       clearHold()
+      if (e.pointerId === swallowId) {
+        swallowId = null
+        dragging = false
+        mode = null
+        dragPane = null
+        touchMode = null
+        try { el.releasePointerCapture(e.pointerId) } catch (_) {}
+        return
+      }
+      const owner = this._owner
+      if (owner && owner.pointerId === e.pointerId) {
+        this._owner = null
+        this._call(owner.rec, 'pointerUp', this._pointer(e, localPos(e)))
+        // A drawing gesture leaves no sticky crosshair behind on touch.
+        if (e.pointerType === 'touch') dismissCrosshair()
+        try { el.releasePointerCapture(e.pointerId) } catch (_) {}
+        return
+      }
+      if (dragging) {
+        const up = localPos(e)
+        // NaN for a coordinate-less event (a synthetic cancel): never a tap.
+        travel = Math.max(travel, Math.abs(up.x - downX), Math.abs(up.y - downY))
+      }
+      // D27. Any region (a price-axis tag is a hit target too), offered at the
+      // DOWN point: that is what the reader aimed at.
+      const isTap = !cancelling && dragging && downButton === 0 &&
+        touchMode !== 'scrub' && touchMode !== 'pan' &&
+        travel < (downType === 'touch' ? TOUCH_SLOP : 3)
+      if (isTap && this._plugins.length) {
+        if (this._offer('tap', this._pointer(e, { x: downX, y: downY }))) {
+          claimed = true
+          touchMode = null
+        }
+      }
       /**
        * A tap: down and up inside the slop, before the hold elapsed. That is
        * the gesture a reader makes to ask "what is this bar", and it is the
@@ -853,6 +1080,7 @@ export class Chart {
     }
 
     this._onLeave = () => {
+      if (this._plugins.length) this._hoverNone('leave')
       /**
        * Touch fires pointerleave immediately after pointerup, because the
        * pointer stops existing when the finger lifts. Clearing here would
@@ -896,8 +1124,13 @@ export class Chart {
       let hit = { mode: 'pan', pane: null }
       if (isFinite(e?.clientX) && isFinite(e?.clientY)) {
         const p = localPos(e)
+        // A DOM dblclick is a MouseEvent with no pointerType, even after two
+        // finger taps: report the type of the presses that made it, so a
+        // double-tap is hit-tested with the finger tolerance.
+        if (this._plugins.length && this._offer('doubleClick', this._pointer(e, p, lastType))) return
         hit = this._classifyDrag(p.x, p.y)
       }
+      if (prevClaimed || claimed) return
       if (hit.mode === 'price') hit.pane.ps.resetAuto()
       else if (hit.mode === 'time') this.ts.reset()
       else { this.ts.reset(); this._resetAutoScales() }
@@ -905,6 +1138,7 @@ export class Chart {
     }
 
     this._onKey = (e) => {
+      if (this._plugins.length && this._offer('keyDown', e)) { e.preventDefault(); return }
       const step = e.shiftKey ? 120 : 40
       if (e.key === 'ArrowLeft') { this.ts.panBy(step); this.loop.invalidate('all'); this._maybeLoadHistory() }
       else if (e.key === 'ArrowRight') { this.ts.panBy(-step); this.loop.invalidate('all') }
@@ -917,11 +1151,32 @@ export class Chart {
     this._onClick = (e) => {
       // `moved` is still set from the gesture that just ended — a pan that
       // happens to finish over a marker must not read as a click on it.
-      if (moved) return
+      if (moved || claimed) return
       if (!this._listeners.markerClick.size) return
       const p = localPos(e)
       const hit = this.markerAt(p.x, p.y)
       if (hit) for (const fn of this._listeners.markerClick) fn(hit)
+    }
+
+    /**
+     * The browser dropped pointer capture without an up we saw. After a normal
+     * up _owner is already null, so this only ever ends a stuck gesture.
+     */
+    this._onLostCapture = (e) => {
+      if (this._owner && e.pointerId === this._owner.pointerId) this._onCancel(e)
+    }
+    /**
+     * A native menu opening mid-gesture swallows the up: end the gesture now.
+     * Otherwise a plugin may claim the right-click (a drawing's own menu). A
+     * chart without plugins never prevents the browser menu.
+     */
+    this._onContextMenu = (e) => {
+      if (this._owner) {
+        this._cancelOwner()
+        e.preventDefault()
+        return
+      }
+      if (this._plugins.length && this._offer('contextMenu', this._pointer(e, localPos(e), lastType))) e.preventDefault()
     }
 
     el.addEventListener('click', this._onClick)
@@ -933,10 +1188,12 @@ export class Chart {
     el.addEventListener('wheel', this._onWheel, { passive: false })
     el.addEventListener('dblclick', this._onDbl)
     el.addEventListener('keydown', this._onKey)
+    el.addEventListener('lostpointercapture', this._onLostCapture)
+    el.addEventListener('contextmenu', this._onContextMenu)
     if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0')
   }
 
-  _emitCrosshair(p) {
+  _emitCrosshair(p, safe) {
     if (this._listeners.crosshair.size) {
       let payload = null
       // Resolve the pane under the pointer, not the price pane. The crosshair
@@ -952,11 +1209,26 @@ export class Chart {
         const bar = this.bars[i]
         // `price` is in THAT pane's scale, so `pane` has to come with it —
         // 63.4 means nothing without knowing it is the RSI pane.
-        if (bar) payload = { index: i, bar, price: pane.ps.price(p.y), pane: pane.id }
+        // An exact point was already snapped by a plugin: report the price it
+        // stored, not a y round-trip of it. Number.isFinite, because the
+        // global one reads null as 0.
+        const price = p.exact && Number.isFinite(p.price) ? p.price : pane.ps.price(p.y)
+        if (bar) payload = { index: i, bar, price, pane: pane.id }
       }
-      for (const fn of this._listeners.crosshair) fn(payload)
+      for (const fn of this._listeners.crosshair) this._fire(fn, 'crosshair', payload, safe)
     }
-    this._updateHover(p)
+    this._updateHover(p, safe)
+  }
+
+  /**
+   * Call a listener. `safe` (a deferred emit from inside a frame) isolates a
+   * throw exactly as _emitState does: a host's broken legend must not count
+   * against a plugin's tick or the Loop's error budget. Input-path emits stay
+   * unguarded, as in 0.11.
+   */
+  _fire(fn, event, payload, safe) {
+    if (!safe) return fn(payload)
+    try { fn(payload) } catch (e) { console.error(`[Emberwick] '${event}' listener threw`, e) }
   }
 
   /**
@@ -974,15 +1246,29 @@ export class Chart {
     return null
   }
 
-  _updateHover(p) {
-    const hit = p ? this.markerAt(p.x, p.y) : null
+  _updateHover(p, safe) {
+    // The plugins layer paints above the markers, so what a plugin reports
+    // under the pointer occludes marker hover (and, through `claimed`, click).
+    // Plugins yield fills to markers themselves (D24) by not reporting them.
+    const hit = p && !this._owner && !this._pluginHit ? this.markerAt(p.x, p.y) : null
     const id = hit ? hit.id : null
-    if (id === this._hoverMarkerId) return
-    this._hoverMarkerId = id
-    this.container.style.cursor = hit ? 'pointer' : 'crosshair'
-    // the hover ring is drawn with the markers, so that layer must repaint
-    this.loop.invalidate('main')
-    for (const fn of this._listeners.markerHover) fn(hit)
+    if (id !== this._hoverMarkerId) {
+      this._hoverMarkerId = id
+      // the hover ring is drawn with the markers, so that layer must repaint
+      this.loop.invalidate('main')
+      for (const fn of this._listeners.markerHover) this._fire(fn, 'markerHover', hit, safe)
+    }
+    this._applyCursor()
+  }
+
+  /** The single writer of the container cursor, deduped. */
+  _applyCursor() {
+    const hit = this._pluginHit
+    const css = this._cursorOverride ||
+      (hit && hit.cursor) || (this._hoverMarkerId != null ? 'pointer' : 'crosshair')
+    if (css === this._cursorCss) return
+    this._cursorCss = css
+    this.container.style.cursor = css
   }
 
   subscribe(event, fn) {
@@ -1358,6 +1644,11 @@ export class Chart {
 
   // ----------------------------------------------------------------- frame --
   _frame(dirty, dt) {
+    this._inFrame = true
+    try { return this._renderFrame(dirty, dt) } finally { this._inFrame = false }
+  }
+
+  _renderFrame(dirty, dt) {
     let animating = false
 
     // First: replay may append or swap bars, and everything below reads them.
@@ -1424,6 +1715,12 @@ export class Chart {
     }
 
     const redrawAll = animating || dirty.has('all') || dirty.has('base') || dirty.has('main')
+    // Plugins run after every scale has ticked, in the same frame as the
+    // candles, and BEFORE `state` captures this.cursor: a plugin re-deriving a
+    // held anchor may move the crosshair. Their keep-alive is returned to the
+    // loop but NEVER folded into `animating`, or a hover fade would repaint
+    // the grid and every candle.
+    const pluginsBusy = this._plugins.length ? this._framePlugins(dirty, dt, redrawAll) : false
     const state = {
       theme: this.theme,
       ts: this.ts,
@@ -1504,8 +1801,15 @@ export class Chart {
     // finished reading the state it would mutate.
     this._emitVisibleRange(from, to)
     this._emitReplay()
+    // A crosshair a plugin moved during tick() is announced now, after every
+    // renderer has read the state a listener might mutate.
+    if (this._crosshairPending) {
+      this._crosshairPending = false
+      this._emitCrosshair(this.cursor, true)
+    }
+    if (this._plugins.length) for (const rec of this._plugins) this._call(rec, 'afterFrame')
 
-    return animating
+    return animating || pluginsBusy
   }
 
   // ------------------------------------------------------------------- api --
@@ -1528,6 +1832,10 @@ export class Chart {
   }
 
   setAnimate(on) {
+    // Recorded, not only forwarded: LiveCandle was the one thing that heard
+    // setAnimate(false), and anything else reading options.animate — a plugin
+    // deciding whether to animate — went on seeing the constructor's value.
+    this.options.animate = !!on
     this.live.enabled = !!on
     this.loop.invalidate('all')
   }
@@ -1687,8 +1995,217 @@ export class Chart {
     this.layers.measure()
   }
 
+  // --------------------------------------------------------------- plugins --
+  /** @experimental Attach an opt-in plugin. See README "Plugins". */
+  addPlugin(plugin) {
+    if (!plugin || typeof plugin !== 'object') throw new Error('Chart: addPlugin() needs a plugin object')
+    if (this._destroyed) throw new Error('Chart: addPlugin() on a destroyed chart')
+    if (this._plugins.some((r) => r.plugin === plugin)) return this
+    // Created on the first attach only: a chart with no plugin keeps exactly
+    // the three canvases it always had.
+    this.layers.add('plugins', 'overlay')
+    const rec = { plugin, errors: 0, failed: false, host: null }
+    rec.host = this._makeHost(rec)
+    this._plugins.push(rec)
+    this._call(rec, 'attach', rec.host)
+    this.loop.invalidate('plugins')
+    return this
+  }
+
+  removePlugin(plugin) {
+    const i = this._plugins.findIndex((r) => r.plugin === plugin)
+    if (i < 0) return this
+    const rec = this._plugins[i]
+    if (this._owner && this._owner.rec === rec) this._cancelOwner()
+    this._plugins.splice(i, 1)
+    this._call(rec, 'detach')
+    if (this._pluginHit && this._pluginHit.rec === rec) this._pluginHit = null
+    this._cursorOverride = null
+    if (this._plugins.length) this.loop.invalidate('plugins')
+    else this.layers.remove('plugins')
+    this._applyCursor()
+    return this
+  }
+
+  _makeHost(rec) {
+    const chart = this
+    return {
+      chart,
+      get ts() { return chart.ts },
+      get bars() { return chart.bars },
+      get source() { return chart._replay ? chart._replay.source : chart.bars },
+      get replay() { return chart._replay },
+      get timeframeMs() { return chart.ts.timeframeMs },
+      get barGen() { return chart._barGen },
+      get panes() { return chart._panes },
+      get theme() { return chart.theme },
+      get fmt() { return chart.fmt },
+      get width() { return chart.layers.width },
+      get height() { return chart.layers.height },
+      get pixelRatio() { return chart.layers.dpr },
+      get plotBottom() { const r = chart._panes[chart._panes.length - 1].rect; return r.y + r.h },
+      get magnet() { return chart.options.magnet !== false },
+      get priceLines() { return chart.priceLines },
+      get animate() { return chart.options.animate !== false },
+      get exporting() { return chart._pluginInfo.exporting },
+      invalidate() { chart.loop.invalidate('plugins') },
+      setCursor(css) { chart._cursorOverride = css || null; chart._applyCursor() },
+      setHover(css) {
+        chart._pluginHit = css ? { rec, cursor: css } : (chart._pluginHit && chart._pluginHit.rec === rec ? null : chart._pluginHit)
+        chart._applyCursor()
+      },
+      setCrosshair(p) {
+        chart.cursor = p || null
+        chart._stickyCursor = false
+        chart.loop.invalidate('overlay')
+        // From tick(): this frame's overlay draws it (plugins run before
+        // `state` reads this.cursor); listeners hear about it after drawing.
+        if (chart._inFrame) chart._crosshairPending = true
+        else chart._emitCrosshair(chart.cursor)
+      },
+      release() { if (chart._owner && chart._owner.rec === rec) chart._releaseOwner() },
+      paneAt(y) { return paneAtY(chart._panes, y) },
+      paneById(id) { return chart._paneById.get(String(id)) || null },
+      formatPrice(price, pane) {
+        const pn = pane || chart._panes[0]
+        const { step } = priceTicks(pn.ps.lo, pn.ps.hi, Math.max(2, Math.floor(pn.rect.h / 58)))
+        return toNumber(price).toFixed(decimalsFor(step))
+      },
+      reportError(err, phase) { chart._emitError(err, 'plugin ' + phase) },
+    }
+  }
+
+  _pointer(e, p, type) {
+    const t = this._classifyDrag(p.x, p.y)
+    return {
+      x: p.x, y: p.y, pointerId: e.pointerId, pointerType: e.pointerType || type || 'mouse',
+      button: e.button || 0, buttons: e.buttons || 0,
+      shiftKey: !!e.shiftKey, altKey: !!e.altKey, ctrlKey: !!e.ctrlKey, metaKey: !!e.metaKey,
+      region: t.mode === 'price' ? 'priceAxis' : t.mode === 'time' ? 'timeAxis' : 'plot',
+      pane: t.pane, timeStamp: +e.timeStamp || 0, event: e,
+    }
+  }
+
+  /** Input hook, guarded. A throw is reported and reads as "not claimed". */
+  _call(rec, hook, a, b) {
+    const fn = rec.plugin[hook]
+    if (typeof fn !== 'function') return undefined
+    try { return fn.call(rec.plugin, a, b) } catch (err) { this._emitError(err, 'plugin ' + hook); return undefined }
+  }
+
+  /** Offer to plugins topmost-first; the first to return true wins. */
+  _offer(hook, a) {
+    for (let i = this._plugins.length - 1; i >= 0; i--) {
+      const rec = this._plugins[i]
+      // A hook may detach plugins (a host tearing its layer down from a
+      // listener): skip the gaps, and never hand a gesture to a plugin that
+      // is no longer attached.
+      if (rec && this._call(rec, hook, a) === true && this._plugins.indexOf(rec) >= 0) return rec
+    }
+    return null
+  }
+
+  _cancelOwner() {
+    const owner = this._owner
+    if (!owner) return
+    this._owner = null
+    this._call(owner.rec, 'pointerCancel')
+    this._cursorOverride = null
+    this._applyCursor()
+  }
+
+  /** Topmost non-null hover result wins; every plugin below is told null ('occluded'). */
+  _hover(ev) {
+    let won = null
+    let res = null
+    for (let i = this._plugins.length - 1; i >= 0; i--) {
+      const rec = this._plugins[i]
+      if (!rec) continue
+      const r = won ? (this._call(rec, 'hover', null, 'occluded'), null) : this._call(rec, 'hover', ev)
+      if (!won && r) { won = rec; res = r }
+    }
+    this._pluginHit = res && res.cursor ? { rec: won, cursor: res.cursor } : null
+    return res
+  }
+
+  /** reason: 'leave' (pointer left the chart) | 'pan' (an unclaimed pan press began). */
+  _hoverNone(reason) {
+    for (const rec of this._plugins) this._call(rec, 'hover', null, reason)
+    this._pluginHit = null
+    this._applyCursor()
+  }
+
+  /**
+   * Frame hooks, each guarded. A plugin failing 10 consecutive frames is
+   * removed and reported: it must never spend the Loop's own
+   * MAX_FRAME_ERRORS budget and stop the candles.
+   *
+   * A frame counts as clean only if the plugin's draw ran in it (or it has
+   * no draw): frames that paint nothing prove nothing, and must not reset the
+   * count of a plugin whose draw throws on every frame that does paint.
+   */
+  _framePlugins(dirty, dt, full) {
+    const info = this._pluginInfo
+    info.full = full
+    info.dt = dt
+    let busy = false
+    for (const rec of this._plugins) {
+      rec.failed = false
+      if (rec.plugin.tick) {
+        try { if (rec.plugin.tick(dt, info) === true) busy = true } catch (err) { rec.failed = true; this._emitError(err, 'plugin tick') }
+      }
+    }
+    const paint = full || busy || dirty.has('plugins')
+    if (paint) this._paintPlugins(this.layers.ctx.plugins, info, true)
+    for (let i = this._plugins.length - 1; i >= 0; i--) {
+      const rec = this._plugins[i]
+      if (!rec) continue
+      if (rec.failed) rec.errors++
+      else if (paint || !rec.plugin.draw) rec.errors = 0
+      if (rec.errors >= 10) {
+        this.removePlugin(rec.plugin)
+        this._emitError(new Error('plugin removed after 10 consecutive failing frames'), 'plugin')
+      }
+    }
+    return busy
+  }
+
+  _paintPlugins(ctx, info, clear) {
+    if (!ctx) return
+    if (clear) ctx.clearRect(0, 0, this.layers.width, this.layers.height)
+    for (const rec of this._plugins) {
+      if (!rec.plugin.draw) continue
+      ctx.save()
+      try { rec.plugin.draw(ctx, info) } catch (err) { rec.failed = true; this._emitError(err, 'plugin draw') }
+      ctx.restore()
+    }
+  }
+
   toImage() {
-    return this.layers.composite().toDataURL('image/png')
+    if (!this._plugins.length) return this.layers.composite().toDataURL('image/png')
+    // base/main hold the LAST frame's pixels, while a plugin projects through
+    // the scales as they are NOW: after a synchronous fitContent() or
+    // setVisibleRange() the two disagree. Render every layer from the current
+    // state first. dt 0 advances no animation (every tick is linear in dt).
+    // Skipped when called from a listener inside a frame: those run after
+    // drawing, so the layers already agree.
+    if (!this._inFrame) {
+      try { this._frame(new Set(['all']), 0) } catch (err) { this._emitError(err, 'toImage') }
+    }
+    // A clean pass, painted into the COMPOSITE between main and overlay:
+    // committed drawings only — no handles, hover, drafts or half-played
+    // animations. The export pass never paints the live plugins canvas, so
+    // the on-screen chrome needs no restoring.
+    const info = this._pluginInfo
+    const dpr = this.layers.dpr
+    const out = this.layers.composite(this.layers.names.filter((n) => n !== 'plugins'), (c, name) => {
+      if (name !== 'main') return
+      c.save()
+      c.setTransform(dpr, 0, 0, dpr, 0, 0)
+      info.exporting = true
+      try { this._paintPlugins(c, info, false) } finally { info.exporting = false; c.restore() }
+    })
+    return out.toDataURL('image/png')
   }
 
   destroy() {
@@ -1696,6 +2213,9 @@ export class Chart {
     // and both framework adapters can unmount twice (React StrictMode).
     if (this._destroyed) return
     this._destroyed = true
+    // Plugins go first, in reverse, while the loop and layers they hold still
+    // exist — their pointerCancel/detach may still read them.
+    for (let i = this._plugins.length - 1; i >= 0; i--) this.removePlugin(this._plugins[i].plugin)
     // A hold counting down past destroy() would fire into a dead chart and
     // invalidate a stopped loop. Inert, but it keeps a timer and this whole
     // object alive until it elapses.
@@ -1713,6 +2233,8 @@ export class Chart {
     el.removeEventListener('dblclick', this._onDbl)
     el.removeEventListener('keydown', this._onKey)
     el.removeEventListener('click', this._onClick)
+    el.removeEventListener('lostpointercapture', this._onLostCapture)
+    el.removeEventListener('contextmenu', this._onContextMenu)
     this.detachFeed()
     this.loop.stop()
     this.layers.destroy()

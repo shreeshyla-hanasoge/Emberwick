@@ -14,6 +14,10 @@ point it at your own market data.
   with visible-range culling — 500k bars loaded costs only the ~200 on screen.
 - **Annotated.** Nine marker shapes, price lines and shaded zones, with
   collision-aware stacking and hit-testing for hover and click.
+- **Drawn on.** Trendlines, Fibonacci, channels, ranges and positions, pinned
+  to time and price, snapped where you mean and undoable — in a separate entry
+  that is absent from your bundle until you import it. See
+  [Drawing tools](#drawing-tools).
 
 ---
 
@@ -40,9 +44,25 @@ import { createChart, RandomFeed } from 'emberwick'
 </script>
 ```
 
-The UMD build is core-only and exposes the global `Emberwick`. It is for
-`<script>` tags and CDNs only — there is deliberately no `emberwick/umd`
-import specifier, because a UMD file loaded as an ES module exports nothing
+Drawing tools are a second file, loaded **after** the first:
+
+```html
+<script src="https://unpkg.com/emberwick/umd/emberwick.umd.js"></script>
+<script src="https://unpkg.com/emberwick/umd/emberwick-drawings.umd.js"></script>
+<script>
+  const chart = Emberwick.createChart(document.getElementById('chart'))
+  const drawings = EmberwickDrawings.enableDrawings(chart)
+</script>
+```
+
+The UMD core build exposes the global `Emberwick`, and the drawings build
+`EmberwickDrawings`. The drawings file reads `window.Emberwick` rather than
+carrying a second copy of the core, so loading it first throws a message that
+says to load `emberwick.umd.js` before it; folding it into the core file would
+make every CDN user pay for tools they never enable.
+
+Both UMD builds are for `<script>` tags and CDNs only — there is deliberately
+no `emberwick/umd` import specifier, because a UMD file loaded as an ES module exports nothing
 and quietly assigns a global instead.
 
 > **Emberwick is ESM-only.** `import` works everywhere; `require('emberwick')`
@@ -54,15 +74,23 @@ and quietly assigns a global instead.
 Nothing stops you copying the core in directly:
 
 ```bash
-cp -r src/chart /path/to/your-project/src/emberwick
+cp -r src/chart /path/to/your-project/src/chart
+cp -r src/drawings /path/to/your-project/src/drawings   # only if you want drawing tools
 ```
 
 ```js
-import { createChart, RandomFeed } from './emberwick/index.js'
+import { createChart, RandomFeed } from './chart/index.js'
+import { enableDrawings } from './drawings/index.js'
 ```
 
-The folder is self-contained — `src/chart/` has no imports that point outside
-itself, and no framework dependency. Anything that can bundle ES modules
+Copy them as siblings: `src/drawings/` reaches the core only through
+`../chart/index.js`. Vendor both from one release; a mismatch logs one warning
+at `createDrawings`. The core folder has no framework dependency and never
+imports `src/drawings/`. It has one import that points outside it, though:
+`render/watermark.js` reads the logo paths from `src/brand.js`, so copy that
+file to `src/brand.js` beside the folder (or point the import at your own).
+Earlier versions of this section claimed the folder was fully self-contained;
+it was not. Anything that can bundle ES modules
 (Vite, webpack, Rollup, esbuild, or a browser with native ESM) can consume it
 as-is.
 
@@ -73,8 +101,9 @@ as-is.
 | `emberwick` | The core: `createChart`, `Chart`, feeds, themes, motion primitives |
 | `emberwick/react` | `<EmberwickChart />` React component |
 | `emberwick/webcomponent` | Registers `<emberwick-chart>` (side-effecting import) |
+| `emberwick/drawings` | Drawing tools: `enableDrawings`, `createDrawings`, the nine tools, `normalizeDrawings`. 52.8 KB gzipped as the minified UMD, 71.9 KB as unminified ESM, and only when you import it |
 
-TypeScript declarations ship for all three entries. The UMD build is not an
+TypeScript declarations ship for all four entries. The UMD build is not an
 import specifier — it is a file you point a `<script>` tag or a CDN at.
 
 ---
@@ -264,6 +293,7 @@ const chart = createChart(el, {
 | `stopReplay()` | Leave replay and reveal the whole dataset again |
 | `replayState()` | Current playback state. `{ active: false, ... }` when not replaying |
 | `chart.replay` | Getter — the active `Replay` controller, or `null` |
+| `addPlugin(plugin)` / `removePlugin(plugin)` | Experimental. Attach an opt-in layer that gets its own canvas and the first offer of every gesture. See [Plugins](#plugins-experimental) |
 | `toImage()` | PNG data URL of the composited layers |
 | `fitContent()` | Zoom and scroll so the whole dataset is on screen. Not animated |
 | `setVisibleRange({ from, to })` | Open on a window of it instead — inclusive bar indices. Not animated |
@@ -705,6 +735,640 @@ if you need them guaranteed visible.
 
 ---
 
+## Drawing tools
+
+Trendlines, levels, Fibonacci, channels, ranges, measures, positions and text,
+drawn on the chart by the reader and stored as plain data by you. They are a
+separate entry, `emberwick/drawings`, so a chart that never imports it carries
+none of the code (see [Size and opt-in](#size-and-opt-in)).
+
+### Enabling
+
+```js
+import { createChart } from 'emberwick'
+import { enableDrawings } from 'emberwick/drawings'
+
+const chart = createChart(el)
+const drawings = enableDrawings(chart)
+
+drawings.setTool('trendLine')          // the reader clicks or drags on the chart
+drawings.subscribe('change', () => save(drawings.getDrawings()))
+```
+
+`enableDrawings(chart, options?)` gives you the nine standard tools.
+`createDrawings(chart, { tools: [trendLine, fibRetracement] })` gives you
+exactly the tools you pass, and takes no default on purpose: a default
+parameter would keep all nine alive in every bundle that imports the function,
+and the tools tree-shake only if nothing names them.
+
+A second `enableDrawings` on the same chart throws until the first controller
+is `destroy()`ed. That is deliberate: React StrictMode runs an effect, its
+cleanup and the effect again, and the second run must get a fresh controller,
+never the destroyed one.
+
+Options, all optional:
+
+```js
+enableDrawings(chart, {
+  drawings: saved,          // initial load; not undoable, see "Saving and loading"
+  magnet: 'inherit',        // 'inherit' | 'off' | 'weak' | 'strong'
+  stickyTools: false,       // keep the tool armed after each drawing
+  quickMeasure: true,       // Shift+click-click measures with no tool armed
+  keyboard: true,           // Delete, arrows, Ctrl/Cmd+Z ... while the chart has focus
+  textEditor: true,         // false hands text editing to you through 'edit'
+  historyLimit: 100,        // undo depth
+  motion: 'auto',           // 'auto' | 'full' | 'reduced' | 'none'
+  readOnly: false,          // render, hover, select and events, but no edits
+  defaults: { trendLine: { style: { lineWidth: 2 } } },  // per-type starting style/options
+  theme: { accent: '#ff8a00' },                          // see "Styling"
+  maxDrawings: 5000,        // rows past it are rejected with reason 'limit'
+})
+```
+
+`platform`, `prefersReducedMotion` and `idFactory` are also injectable, for
+tests and for hosts that mint their own ids.
+
+### Tools and presets
+
+Nine stored types, fourteen presets. A preset is a type plus the options it
+starts with, and variants share a type on purpose: a ray is a trend line whose
+`extend` is `'right'`, so the reader can turn it back into a segment after
+drawing it, and you store one kind of row for both.
+
+| Preset (`setTool`) | Stored `type` | What it draws |
+|---|---|---|
+| `trendLine`, `ray`, `extendedLine`, `arrow` | `trendLine` | Two points. Optional extension to either side, arrow caps, and a live `+12.40 (+1.52%) · 38 bars · 6h 20m` readout |
+| `horizontalLine`, `horizontalRay` | `horizontalLine` | One price. A tag on the price axis, and draggable by that tag |
+| `verticalLine` | `verticalLine` | One moment, across every pane (or its own pane only), with a time tag |
+| `rectangle` | `rectangle` | Two corners. Fill, optional middle line, optional stats |
+| `parallelChannel` | `parallelChannel` | A baseline, then a click for the parallel. The second click has an auto-fit magnet to the highest high or lowest low between the ends |
+| `fibRetracement` | `fibRetracement` | Standard levels 0 to 1 visible, 1.272, 1.618 and 2.618 hidden; each level's colour and visibility is stored. Linear or log interpolation |
+| `measure` | `measure` | Price change, percent, bars, duration and volume across a box |
+| `long`, `short` | `position` | Entry, target and stop. One click makes a bracket sized from the 14-bar ATR (1.5 ATR stop, 2R target); a press-drag sets the target and mirrors the stop. Reads `R:R`, and once the bars after the entry reach the target or the stop, says which happened |
+| `text` | `text` | A note, edited in place |
+
+`TOOL_PRESETS` is exported with each preset's `label` and `group`, so a
+toolbar can be built from it rather than kept in step with it by hand. (The
+demo's rail is.)
+
+A few behaviours worth knowing before they surprise you:
+
+- **The position tool is honest about a bad stop.** A stop on the wrong side of
+  the entry is allowed, because clamping or flipping user data hides the
+  mistake. Both zones turn magenta (`theme.warn`), the label reads `R:R —`, and a one-shot pulse
+  plays as it crosses over. Nothing pulses again afterwards.
+- **A stop and a target in one bar count as the stop**, and the label says
+  `(same bar)`. Bars alone cannot say which came first, and the pessimistic
+  reading is the one to build a review on.
+- **Everything that reads OHLC or volume reads revealed bars only**, so a
+  position replayed through history flips to "Target hit" on the step that
+  reveals it, not before.
+
+### Drawing with a mouse
+
+| Input | Action |
+|---|---|
+| Pick a tool, click and drag | Draws it (release to finish) |
+| Pick a tool, click, move, click | Also draws it: a quick click-click places both ends |
+| Click a drawing | Selects it. Handles appear |
+| Drag a handle | Reshapes; the opposite corner or edge of a rectangle stays put and flips cleanly when passed |
+| Drag a selected drawing's body | Moves it |
+| `Alt` + drag a body | Drags a copy |
+| Double-click a text | Edits it; on any other drawing, fires `'edit'` |
+| `Shift` + drag, no tool armed | Quick measure: an ephemeral measure that is never in the document, the history or the events |
+| Right-click a drawing | Selects it and fires `'contextmenu'` (the browser's menu opens only while nobody is subscribed, and on empty chart) |
+| `Shift` while placing | Constrains to 0°, 45° or 90° on screen |
+| `Alt` while placing | Free: no snap at all |
+| `Ctrl` (`Cmd` on macOS) while placing | Inverts the magnet for that gesture |
+
+On a mouse, pressing an unlocked drawing selects it and claims the press, so a
+drawing can be picked up and dragged in one motion. A locked drawing is never
+claimed, so the chart pans through it; a click still selects it, so it can be
+unlocked. Cursors and handle sizes follow the pointer type.
+
+### Drawing on a phone
+
+A finger cannot hover and a phone plot is mostly fill once a box is selected,
+so the touch rules differ on purpose:
+
+| Gesture | Action |
+|---|---|
+| Tap a drawing | Selects it. It does not move, and does not place the crosshair |
+| Drag a selected drawing by a handle, its border, its label or its move handle | Reshapes or moves it |
+| Swipe inside a selected box's fill | Pans, exactly as before. A fill never claims a one-finger press |
+| Tool armed, one finger | Draws. One-finger pan is off while a tool is armed |
+| Tool armed, two fingers | Pans and pinch-zooms, and cancels the in-flight press without leaving a mark |
+| Tap empty chart | Deselects |
+
+Area tools and trend lines get a **move handle** at their centre, drawn as a
+four-way glyph, because on touch the body of a fill is not a place you can
+drag. A handle's hit target is 44 pt, and the point being placed sits under
+the finger without jumping. Tap-to-select-then-drag, rather than
+press-and-drag straight away, is what keeps a chart with a few boxes on it
+scrollable with one finger.
+
+### From the keyboard
+
+Keys reach drawings only while the chart has focus, which `setTool` and
+`select` give it (pass `{ focus: false }` if you select from a list with its own
+keyboard handling). `keyboard: false` turns all of this off.
+
+| Key | Action |
+|---|---|
+| `Esc` | One layer at a time: revert a drag, then cancel a creation, then close the editor, then close a quick measure, then deselect, then disarm |
+| `Delete` / `Backspace` | Remove the selection; the last placed point while placing a channel. A locked drawing shakes instead |
+| `Ctrl`/`Cmd` + `Z` | Undo (during a gesture it only cancels the gesture) |
+| `Ctrl`/`Cmd` + `Shift` + `Z`, `Ctrl` + `Y` | Redo |
+| `Ctrl`/`Cmd` + `D` | Duplicate, five bars to the right |
+| `←` `→` | Nudge one bar (`Shift`: ten). Without a selection they pan, as always |
+| `↑` `↓` | Nudge one pixel of price (`Shift`: ten) |
+| `Enter` on a text | Edit |
+
+Consecutive nudges of one drawing are one undo step, coalesced without a
+clock, so it does not depend on how fast anybody types.
+
+### Snapping and magnet
+
+While placing or dragging a point, the first of these that applies wins:
+
+1. **`Alt`**: free, no snap.
+2. **`Shift`**: a screen angle of 0°, 45° or 90° from the fixed end. At 0° the
+   price is copied bit for bit, so a horizontal trend line is exactly
+   horizontal.
+3. **Another drawing's anchor**: an exact copy of that point, offsets included.
+4. **Levels**: horizontal lines, fib levels, position entry/target/stop, your
+   `priceLines`, and the channel's auto-fit. An alignment guide is drawn when
+   another anchor's price is within 4 px.
+5. **The OHLC magnet**: a candle's open, high, low or close, ordered by what
+   the tool prefers (a fib wants highs and lows).
+6. **The bar slot.**
+
+`magnet` is `'inherit'` by default: it follows `chart.options.magnet`, where
+`true` means weak, so the crosshair and the drawings agree with one setting and
+one reach. `'weak'` snaps within 22 px (28 on touch) and `'strong'` always
+takes the nearest. The **platform modifier** (`Cmd` on macOS and iOS, `Ctrl`
+elsewhere; not `Ctrl` on macOS, where Ctrl+click is a secondary click) inverts
+the magnet for the current gesture. On a sub-pane the magnet reads that pane's
+visible series values instead of candles.
+
+Once a snap has engaged it releases only past 1.5 times its reach, so the
+point does not flicker at the boundary. When the kind of snap changes the point
+glides and a ring pops; a change of bar slot never glides (see
+[How the motion works](#how-the-motion-works)).
+
+### Saving and loading
+
+```js
+const rows = drawings.getDrawings()       // z-ascending deep clones, plain JSON
+const report = drawings.setDrawings(rows) // a load: see below
+```
+
+A drawing looks like this. `getDrawings()` returns the keys in this order, and
+`add()` needs only `type` and `points`:
+
+```js
+{
+  v: 1,                          // schema version, PER DRAWING
+  id: 'dkq1z0xm04ab',
+  type: 'trendLine',
+  pane: 'price',
+  points: [
+    { time: 1717070400000, price: 148.2 },
+    { time: 1717077600000, price: 151.05 },
+  ],
+  style: { color: null, lineWidth: 1.5, lineStyle: 'solid', fill: null,
+           fillOpacity: 0.12, textColor: null, fontSize: 12 },
+  options: { extend: 'right', startCap: 'none', endCap: 'none', stats: 'active', text: '' },
+  locked: false,
+  visible: true,
+  z: 4,                          // sparse; bringToFront is max + 1
+  meta: { ... },                 // yours: JSON-cloned, never read
+}
+```
+
+- **`time` is in your bars' unit and epoch, and is never converted.** If your
+  bars are milliseconds, so is this. If they are IST read as if it were UTC
+  (see [Time zones](#time-zones)), so is this. Store what you were given.
+- **`color: null` follows the theme**, so a light/dark switch recolours the
+  drawing. A stored colour is used as is.
+- **`options` is the full normalised set**, not a sparse diff, so changing a
+  default later never restyles what was already saved.
+- **One row per drawing, one `v` per row.** If you keep a table of drawings,
+  each row carries its own schema version. Additive fields keep `v: 1`; only a
+  change that an older build would misread bumps it.
+- **Unknown keys are carried.** Keys this build does not know, at the top level
+  and inside `style` and `options`, are kept and written back by
+  `getDrawings()`, and survive an `update()`. So a build that nudges a drawing
+  saved by a newer one writes back everything the newer one wrote.
+- **`z` is sparse and explicit**, so reordering rewrites one row rather than
+  renumbering the table.
+
+`setDrawings` accepts an array, `{ drawings: [...] }`, a JSON string, or
+`null`/`undefined` (an empty document, not an error). A string that does not
+parse throws and applies nothing.
+
+**`setDrawings` is a load, not an edit.** It clears the undo history and the
+selection, aborts any gesture, and fires **no `change` event**. That is the
+point of it: if it did, a save-on-change host would write the half-loaded
+document straight back over the stored one. It does emit the `select` and
+`history` state events if those changed, and it returns a `LoadReport`, also
+kept as `drawings.lastLoadReport`:
+
+```js
+{
+  loaded: 12,                     // drawings of a known type accepted
+  carried: ['d7'],                // ids of rows this build cannot read (below)
+  rejected: [{ index: 3, id: 'd9', reason: 'too few points' }],
+  renamed: [{ index: 5, from: 'd2', to: 'd2:2' }],   // duplicate ids get a suffix
+  truncated: [],                  // extra points or oversized unknown keys dropped
+  orphaned: [],                   // drawings on a pane that does not exist (yet)
+}
+```
+
+What comes back always accounts for every row it kept:
+`getDrawings().length === report.loaded + report.carried.length`. The
+`drawings` option loads the same way, and logs one `console.warn` if anything
+was rejected.
+
+**Inert drawings.** A row with an unknown `type`, or a `v` newer than this
+build, is *carried verbatim*: never drawn, hit, selected or edited, but always
+returned by `getDrawings()` in its z slot. `remove()` and `clear()` skip it and
+do not count it. A save-on-change host can therefore never delete a newer
+build's data by opening its document in an older one.
+
+**Orphans.** Removing a pane does not delete the drawings on it: they are kept,
+serialized, not drawn and not hit, and listed by `drawings.orphans()`. They
+come back when a pane with that id is added again.
+
+**Editing through the API:**
+
+| Method | Notes |
+|---|---|
+| `add(input, { history, select, animate })` | Returns the id. Throws on invalid input, on a duplicate `id` (carried rows included) and on an unknown pane |
+| `update(id, patch, { history, animate })` | `points` are replaced; `style` and `options` merge per key (a fib's `levels` are replaced as a whole). Throws on `id`/`type`/`v` in the patch. A patch that changes nothing is a no-op returning `false`, with no history and no events |
+| `remove(idOrIds)` / `clear()` | `clear` is one undo step |
+| `duplicate(id, { offsetBars })` | `null` with no bars or for a carried row |
+| `bringToFront(id)` / `sendToBack(id)` | |
+| `setLocked(id, on)` / `setVisible(id, on)` | Sugar over `update` |
+| `setHidden(on)` | Hide every drawing: a view setting, not a change to the document |
+| `batch(fn)` | **Atomic.** One history entry and one `change` for everything `fn` does. If `fn` throws, the drawings and the selection are restored, nothing is recorded or emitted, and the error is rethrown |
+| `priceAt(id, time)` | The price of a trend line, channel baseline or horizontal line at a time, extension included. The building block for alerts |
+| `drawingAt(x, y)`, `screenBox(id)` | Hit-test in container pixels, for your own context menu; the last painted box |
+
+Mutating the drawing that is being dragged or created (or anything that could,
+like `undo()` or `setDrawings()`) first ends the gesture and reverts it, and
+only then applies. Mutating another drawing leaves the gesture alone.
+
+**The symbol-switch caveat.** The chart has no idea what symbol it shows, so it
+cannot key drawings by symbol. When your host switches symbol, call
+`drawings.setDrawings(saved[symbol] ?? [])` yourself. Until you do, the old
+symbol's drawings sit on the new symbol's candles, which is the one hazard this
+API leaves to you.
+
+`normalizeDrawings(input, tools?)` validates a stored document with no chart,
+is pure, and is safe to import on a server, so a backend can vet rows before it
+stores them. Carried rows come back verbatim.
+
+### How anchors follow your data
+
+Drawings are stored as `{ time, price }` and resolved to a fractional bar index
+through the same scales as the candles. No new scale system is involved.
+
+| What happens | What the drawings do |
+|---|---|
+| Pan, zoom, inertia, autoscale, following live | Re-projected every frame from the same values as the candles. Nothing lags |
+| A live tick, an `append` | Stay put. A held magnet-snapped point is re-derived |
+| `setData`, with the same bars or a reshuffled interior | Re-resolved by time, including when an interior session gap moved |
+| History paged in on the left | Stay under the same candles: every index shifts, and the view shifts with it |
+| A point after the newest bar | Stored as `{ time: lastBarTime, price, offset: k, tf }`, "k bars after". It keeps its distance in bars across session gaps, and a bar-count point cannot know a session calendar |
+| A point before the oldest bar | The mirror image, with a negative `offset`. Load older history and it lands on its real bar |
+| A timeframe change | In-data points map exactly (or fractionally when unaligned); offsets rescale by `tf` |
+| `startReplay`, seek, step, loop | Resolved against the replay's whole dataset, so nothing moves. Drawings past the cursor stay visible: they are your marks. Anything that reads price or volume sees revealed bars only |
+| `setPriceMode('log')` | Anchors unchanged; lines stay straight on screen. A drawing with any price at or below zero is kept but not drawn |
+| A sub-pane (an RSI band) | Projects through that pane's scale and is clipped to it; the magnet reads that pane's series |
+| A sub-pane whose series has not loaded | A press there is not claimed, so no `0.43` "price" is ever stored |
+| Zero bars (for example `setFeed` swapping symbols) | Nothing is drawn or created; drawings and selection are kept, and nudge and duplicate are unconsumed no-ops |
+| `setTheme`, `setTimeZone` | Colours and labels follow. Times are formatted in your zone; stored times are untouched |
+
+Drawings never take part in autoscale. A drag near an edge would otherwise be a
+feedback loop between the thing you are moving and the scale you are moving it
+on.
+
+### Undo and redo
+
+Undo is per drawing. Each history entry records only the ids it changed, as
+frozen before and after states, so undoing one drawing's edit never clobbers
+another drawing you changed since, or an edit you made with `{ history: false }`
+to a different one. (An edit made with `{ history: false }` to the *same*
+drawing is overwritten by an undo across it, which is the documented cost.)
+
+`undo()`, `redo()`, `canUndo`, `canRedo` and `clearHistory()` do what they say.
+A new commit clears the redo stack; the oldest entry is dropped beyond
+`historyLimit`. User gestures and API edits are recorded; selection, tool
+choice, hover, quick measure, text drafts and `setDrawings` are not.
+
+Undo and redo select the surviving drawing, glide it back and give it a brief
+"this changed" halo.
+
+### Events
+
+```js
+const off = drawings.subscribe('change', ({ source, reason, created, updated, removed }) => {
+  // source: 'user' | 'api' | 'history'
+  save(drawings.getDrawings())
+})
+```
+
+| Event | Kind | Payload | Fires |
+|---|---|---|---|
+| `'change'` | notification | `{ source, reason, created, updated: [{ before, after }], removed }` | **Once per commit**: the end of a gesture, an API call, an undo or a redo. Never per drag frame, never on `setDrawings`, and never for a text draft until its first non-empty commit. Carried rows never appear |
+| `'drawing'` | stream | `{ phase: 'create' \| 'move' \| 'reshape', drawing, snap, stats }` | At most once per frame while a draft changes, and only if subscribed. Live readouts, such as R:R while dragging. A creation draft has `id: null` |
+| `'select'` | state | `{ ids, drawings }` | On change, and on subscribe |
+| `'box'` | state | `{ id, box }` for the selected drawing | Whenever its painted box moves half a pixel, and on subscribe |
+| `'tool'` | state | `{ tool, sticky }` | On change (including the auto-disarm after a non-sticky create), and on subscribe |
+| `'history'` | state | `{ canUndo, canRedo, undoSize, redoSize }` | On change, and on subscribe |
+| `'edit'` | notification | `{ id, drawing, box }` | A double-click on a non-text drawing, or text creation with `textEditor: false` |
+| `'contextmenu'` | notification | `{ id, drawing, part, x, y, event }` | A right-click or long-press on a drawing, which is selected first |
+
+`change` reasons are `create`, `move`, `reshape`, `style`, `options`, `text`,
+`lock`, `visibility`, `order`, `remove`, `clear`, `duplicate`, `nudge`,
+`batch`, `undo` and `redo`.
+
+Two of these exist for a specific job, and it is worth being clear which:
+
+- **`change` is for saving.** It is a notification, it is coarse on purpose,
+  and it is safe to debounce.
+- **`drawing` is for showing.** It is a stream at frame rate for a readout, and
+  it is not a substitute for `change`: a gesture that is cancelled emits
+  `drawing` and never `change`.
+- **`box` is for a floating toolbar.** It fires from the chart's own frame,
+  so a toolbar that moves *inside* the callback stays glued to the drawing
+  through a pan, a zoom and an autoscale ease, none of which change
+  `visibleRange`. Write the position straight to the element rather than through
+  framework state, or the toolbar trails by a frame. The Playground does this.
+
+Every listener runs in a `try`/`catch` (a throw is logged as `[Emberwick]
+'drawings:<event>' listener threw`), and **all state is committed before the
+first event fires**, so a listener may call back into the controller. Within
+one operation the order is `change`, `history`, `select`, `tool`.
+
+### Styling
+
+```js
+drawings.setDefaults('trendLine', { style: { color: '#c084fc', lineWidth: 2 } })
+drawings.update(id, { style: { lineStyle: 'dashed' } })
+```
+
+A drawing's `style` is `color`, `lineWidth` (0.5 to 8), `lineStyle`
+(`'solid' | 'dashed' | 'dotted'`, the same names and dashes as price lines and
+series), `fill`, `fillOpacity`, `textColor` and `fontSize` (9 to 32). What each
+tool reads is its own business: a position takes its zones from the theme's
+up and down colours, so its `color` does nothing.
+
+The drawing theme is derived from the chart theme and nothing is added to
+`defaultTheme`. Override any key with the `theme` option:
+
+`line`, `accent`, `handleFill`, `halo`, `labelBg`, `labelText`, `tagText`,
+`up`, `down`, `warn`, `guide`, `font`, `textColor` and `fib` (an array of level
+colours).
+
+Three optional keys on the chart theme itself feed it, so one `setTheme` can
+carry them: `drawingLine`, `drawingAccent` and `drawingFib`. The accent is an
+ember amber, deliberately unlike the up and down colours. The wrong-side
+position colour (`warn`) is a magenta, distinct from the accent, up and down on
+both backgrounds; the `R:R —` label still says it in words.
+
+### Motion
+
+Drawings are held to the same rule as the rest of the chart: motion that is
+glued to the data.
+
+- Anchors never move by themselves, and nothing eases the data-to-pixel
+  mapping. Every frame projects a drawing through the same scales as the
+  candles.
+- What *does* glide is a **residual**, kept in data space (bars, and price) and
+  settling to zero. A snap changing kind, an undo or redo, a nudge, an API
+  `update(..., { animate: true })`, the slop catch-up on touch and a cancelled
+  drag all seed one. Because it is in data units, a residual stays glued to the
+  candles even if the view zooms mid-glide, and it stops the loop as soon as it
+  is under 0.1 px.
+- **Dragging is crisp.** A change of bar slot, or of the magnet's target from
+  one bar to the next, never glides, because a glide would trail the pointer.
+  The house rule that a drag jumps applies here too.
+- Selection handles pop in staggered, hover fades, fib levels stagger in, a new
+  horizontal line grows from where you clicked, a deleted drawing fades out,
+  and a locked drawing shakes when you try to change it.
+
+`motion: 'auto'` follows `chart.options.animate` (`setAnimate(false)` turns it
+off at runtime) and the browser's `prefers-reduced-motion`. `'reduced'` drops
+residuals, overshoot, ripples, stagger, reveals, shakes and pulses, and keeps
+short fades of 120 ms or less. `'none'` finishes everything at once and keeps
+**no** frames alive. Colours change instantly in every mode.
+
+An armed tool under a still mouse costs zero frames, and so does a selected
+drawing once its handles have popped in. Only the `plugins` canvas repaints for
+a hover or a selection, so the candles are never redrawn for it.
+
+### Custom tools
+
+A tool is a plain object, a `ToolDef`. The nine standard ones are written
+against exactly this contract and get no private access. It is
+**experimental**: this is the part of the drawings API most likely to change
+before 1.0.
+
+```js
+const pin = {
+  type: 'pin', label: 'Pin', anchors: 1, creation: 'single',
+  snapPrefs: ['close', 'high', 'low', 'open'], prefBoost: 1,
+  defaultStyle: { color: null, lineWidth: 1.5, lineStyle: 'solid', fill: null,
+                  fillOpacity: 0, textColor: null, fontSize: 12 },
+  defaultOptions: { label: '' },
+  // a NEW object with known keys only, and idempotent: the keys of what this
+  // returns are the "known" options; anything else is carried
+  normalizeOptions: (raw) => ({ label: typeof raw?.label === 'string' ? raw.label.slice(0, 40) : '' }),
+
+  // anchors arrive already projected through the pane's scales
+  project(d, anchors, ctx, out) {
+    const a = anchors[0]
+    if (!Number.isFinite(a.x) || !Number.isFinite(a.y)) return false   // nothing visible
+    out.x = a.x; out.y = a.y
+    out.infinite = false
+    out.bbox = { x0: a.x - 6, y0: a.y - 6, x1: a.x + 6, y1: a.y + 6 }
+    return true
+  },
+  // assign absolute values: never read canvas state back
+  draw(c, g, d, look, ctx) {
+    c.globalAlpha = look.alpha
+    c.fillStyle = d.style.color || ctx.theme.line
+    c.beginPath(); c.arc(g.x, g.y, 4 + 2 * look.hover, 0, Math.PI * 2); c.fill()
+    if (d.options.label) { c.font = ctx.theme.font; c.fillText(d.options.label, g.x + 8, g.y + 4) }
+  },
+  hit: (g, x, y, tol) => (Math.hypot(x - g.x, y - g.y) <= tol + 4 ? { part: 'body' } : null),
+  handles: (g, d, out) => { out[0] = { x: g.x, y: g.y, index: 0, axis: 'xy', cursor: 'grab' }; return 1 },
+  dragHandle: (d0, index, snapped) => [snapped.point],
+}
+
+const drawings = createDrawings(chart, { tools: [trendLine, pin] })
+drawings.add({ type: 'pin', points: [{ time, price }], options: { label: 'entry' } })
+```
+
+`project` is the single source of geometry for `draw`, `hit`, `handles` and the
+export, so what is drawn is what is hit. Optional members add `complete` (expand
+a click into more points), `dragBody`, `bleed` (how far your pixels reach past
+the anchors, so culling never pops you out mid-pan), `angleOrigin`,
+`snapTargets`, `axisTags`, `stats` and `priceAt`. A custom tool has no preset:
+arm it with `setTool('pin')`. A drawing whose tool throws is marked broken and
+skipped, reported once through the chart's `'error'` event, and never blanks
+the others; the reader can still select and delete it. See
+`src/drawings/index.d.ts` for the full contract.
+
+### Framework recipes
+
+There is no adapter code: importing drawings from the React or web-component
+entry would ship them to everyone who uses those. Each recipe **enables
+synchronously** and loads afterwards, so an unmount during the load can never
+destroy a chart and then enable drawings on it, and the `LoadReport` stays
+reachable.
+
+**React**
+
+```jsx
+import { EmberwickChart } from 'emberwick/react'
+import { enableDrawings } from 'emberwick/drawings'
+
+useEffect(() => {
+  const d = enableDrawings(ref.current.chart)
+  let live = true
+  api.load(id).then((rows) => { if (live && !d.destroyed) setReport(d.setDrawings(rows)) })
+  const off = d.subscribe('change', save)
+  return () => { live = false; off(); d.destroy() }
+}, [id])
+```
+
+The parent's effect runs after the child adapter's, so `chart` already exists.
+StrictMode's second run gets a fresh controller because `destroy()` released
+the first.
+
+**Web component.** Call `enableDrawings(el.chart)` after the element connects.
+Disconnecting and reconnecting re-creates the chart, so persist through
+`change` and enable again.
+
+**Vue 3** (as Traed does):
+
+```js
+onMounted(async () => {
+  drawings = enableDrawings(chart)                    // synchronous: exists before any await
+  drawings.subscribe('change', debounce(() => api.save(id, drawings.getDrawings()), 400))
+  const rows = await api.load(id)
+  if (!drawings.destroyed) report.value = drawings.setDrawings(rows)
+})
+onBeforeUnmount(() => { drawings?.destroy(); chart?.destroy() })
+```
+
+The controller carries `__v_skip`, so Vue never deep-proxies it, and drawings on
+an RSI pane work as they are.
+
+### Size and opt-in
+
+Stated plainly, with numbers measured by `npm run size` (gzipped):
+
+- **No drawing code is in the core.** A chart that never imports
+  `emberwick/drawings` carries none of it, and CI builds the core with and
+  without the drawings entry and fails unless `index.js` and its source map
+  come out **byte-identical**.
+- **The plugin seam is generic and costs the core +4.2 KB** in the unminified
+  ESM (36.0 KB, from 31.8) and +2.6 KB in the minified UMD (20.3 KB, from 17.7).
+  It is larger than the ~2.6 KB first estimated because the ESM keeps the
+  comments, and the gesture handling is where the comments are. With no plugin
+  attached it costs **nothing at runtime**: three canvases, and one length check
+  per input hook.
+- **The drawings cost 71.9 KB as unminified ESM and 52.8 KB as the minified
+  UMD**, only when you import them. That is a large number next to a 20 KB core,
+  and it is the honest one: nine tools, a snap pipeline, a state machine, an
+  undo history, a motion system and a schema loader are not small. `createDrawings`
+  with the tools you name lets a bundler drop the ones you do not.
+
+---
+
+## Plugins (experimental)
+
+Drawings are built on a small, generic seam that is public. **It is
+experimental and may change before 1.0**, and it is typed `@experimental` in
+`index.d.ts`. It exists because gesture state in the chart lives in closure
+locals, so nothing outside could take part in a press correctly; the
+alternatives were worse (drawing on `overlay`, which the crosshair clears on
+every pointer move; drawing on `main`, which would repaint every candle for a
+line drag; monkey-patching the handlers; a canvas per plugin at about 7 MB
+each at 900×500 and a pixel ratio of 2).
+
+```js
+const plugin = {
+  attach(host) { this.host = host },
+  draw(ctx, info) { /* paint on the plugins canvas */ },
+  pointerDown(e) { return true },   // true: this plugin owns the gesture
+}
+chart.addPlugin(plugin)             // idempotent per object
+chart.removePlugin(plugin)
+```
+
+Every hook is optional, and `this` is the plugin:
+
+| Hook | Called | Notes |
+|---|---|---|
+| `attach(host)` / `detach()` | On add / remove (and chart `destroy()`) | |
+| `tick(dt, info)` | Every frame while attached | Advance your own state. `info.full` means the view moved or everything was invalidated: re-derive held points there. Return `true` to keep the loop awake **without** repainting the candles |
+| `draw(ctx, info)` | When the plugins layer repaints | The context is cleared, pixel-ratio scaled and `save`/`restore`-wrapped. `info.exporting` is true during `toImage()` |
+| `afterFrame()` | After the chart's own state events | The safe place to emit to your listeners |
+| `hover(e, reason)` | A mouse or pen moved | Return `{ cursor, crosshair }`. `e === null` says why: the pointer left, a pan press began, or a plugin above reported a hit |
+| `pointerDown(e)` | A press | Return `true` to own it until up, cancel or `host.release()` |
+| `pointerMove(e)` / `pointerUp(e)` | For the owner's own pointer | `pointerUp` runs synchronously inside the DOM event, so `focus()` works there on iOS |
+| `pointerCancel()` | A second finger, a browser cancel, a lost capture, a context menu mid-gesture, a new press while still owning, removal | Every claimed press ends exactly once |
+| `tap(e)` | An unclaimed primary press that never left the slop | `true` consumes it |
+| `doubleClick(e)` / `contextMenu(e)` / `keyDown(e)` | | `true` consumes: no view reset, no browser menu, no pan or zoom key |
+
+Input is offered to plugins first, topmost first, and the first to return
+`true` wins. `PluginPointer` carries the position in chart pixels, the pointer
+type, modifiers, the `region` (`'plot' | 'priceAxis' | 'timeAxis'`, the chart's
+own test, so you agree with its gestures) and the pane under it.
+
+`host` is one object per attachment, all getters, so every read is live:
+`chart`, `ts`, `bars` (under replay, the revealed prefix), `source` (the whole
+replay dataset: **resolve anchors against this**), `replay`, `timeframeMs`,
+`barGen`, `panes`, `theme`, `fmt`, `width`, `height`, `pixelRatio`,
+`plotBottom`, `magnet`, `priceLines`, `animate` and `exporting`; and the
+methods `invalidate()`, `setCursor(css)`, `setHover(css)`, `setCrosshair(point)`,
+`release()`, `paneAt(y)`, `paneById(id)`, `formatPrice(price, pane?)` and
+`reportError(err, phase)`. Plugins must not read `_`-prefixed chart members;
+everything they need is here or public on `host.chart`. The `panes` are the
+chart's live pane objects, so `visible` is rebuilt every frame: do not keep it.
+
+**Layer order.** Attaching the first plugin creates a fourth canvas, and the
+stack becomes `base`, `main`, **`plugins`**, `overlay`, which moves the
+overlay's `z-index` from 3 to 4 (it matters only if you stack your own
+elements inside the container). It is dropped with the last plugin, so a chart
+without one is exactly what it was.
+
+**Dirty and keep-alive rules.** `host.invalidate()` repaints the plugins layer
+next frame and not the candles. `tick` returning `true` keeps the loop running;
+returning nothing lets an idle chart drop to zero CPU. A plugin that animates
+must say so or it stops.
+
+**Errors are isolated.** A hook that throws is reported through the chart's
+`'error'` event with the phase `plugin <hook>` and reads as "not claimed". A
+plugin whose frame hooks fail ten painted frames in a row is removed, which is
+the same budget the render loop has. A throwing listener of your own `'error'`
+handler is not isolated from inside a frame.
+
+**Exporting.** With a plugin attached, `toImage()` first re-renders every layer
+from the current state, then calls your `draw` on the composite canvas between
+`main` and `overlay` with `info.exporting` set. That re-render runs `tick` and
+`afterFrame` once, so state events can fire from inside `toImage()`.
+
+**Reserved and not built:** a `beforeFrame(dt)` hook (edge auto-pan would need
+it), a `below` layer placement, and an autoscale `extent()` hook.
+
+---
+
 ## Time zones
 
 Axis labels and the crosshair read in the browser's local zone by default.
@@ -802,6 +1466,23 @@ window that wide has nothing legible in it either way.
 The container gets `tabindex="0"` if it has none, so keyboard nav works
 without extra markup.
 
+When a [plugin](#plugins-experimental) is attached (drawings are one), it is
+offered input first, and a few behaviours change with it:
+
+- **Double-click, taps, context menus and keys are offered to plugins first.**
+  A double-click that completes a plugin gesture (the second click of a
+  click-click trend line) never also resets the view.
+- **What counts as a tap.** A primary press that never travelled past the slop
+  (3 px for mouse and pen, 10 px for touch) from where it went down, was not
+  cancelled, was not a scrub and was not swallowed by a plugin. It is offered
+  at the *down* point, in every region.
+- **A third finger is ignored** during a pinch, and the finger left after a
+  pinch keeps panning instead of drawing a stray crosshair.
+- **A stuck press ends itself.** A mouse or pen move that reports no buttons
+  held during a press, or a lost pointer capture, ends the press. (A press
+  whose `pointerup` was swallowed, by a native context menu or a modal, used to
+  keep panning on hover.)
+
 ### Touch
 
 A finger cannot hover. On a mouse the crosshair tracks a pointer that is
@@ -816,6 +1497,10 @@ instead:
 | Long-press, then drag | Scrub — the crosshair follows the finger and the chart does not pan |
 | Drag straight away | Pan, exactly as a mouse drag does. The crosshair is hidden for the gesture |
 | Two-finger pinch | Zoom, and dismiss the crosshair |
+| Two fingers, moving together | Pan as well as zoom, so a pinch that drifts moves the view instead of only scaling it |
+
+With a drawing tool armed, one finger draws instead of panning and two fingers
+pan; see [Drawing on a phone](#drawing-on-a-phone).
 
 A crosshair placed by tap or long-press is *sticky*: it outlives the gesture,
 because a reader who taps a bar wants to read it after lifting their finger.
@@ -850,6 +1535,9 @@ Available keys: `background`, `grid`, `axisLine`, `text`, `textStrong`, `up`,
 `down`, `upFill`, `downFill`, `wickUp`, `wickDown`, `volumeUp`, `volumeDown`,
 `crosshair`, `labelBg`, `labelText`, `tagText`, `font`, `priceAxisWidth`,
 `timeAxisHeight`.
+
+Three optional keys feed the [drawing theme](#styling) and nothing in the core
+reads them: `drawingAccent`, `drawingLine` and `drawingFib` (an array).
 
 ---
 
@@ -1029,15 +1717,29 @@ import {
   Replay, MIN_SPEED, MAX_SPEED, // bar-by-bar playback
   easeOutCubic, easeInOutCubic,
   mulberry32,                   // seeded PRNG
+  toNumber, DASH,               // the coercion and dash arrays inputs share
   version,
 } from 'emberwick'
+
+import {
+  enableDrawings, createDrawings, STANDARD_TOOLS, TOOL_PRESETS,
+  trendLine, horizontalLine, verticalLine, rectangle, parallelChannel,
+  fibRetracement, measure, position, text,   // the nine tools
+  normalizeDrawings,                         // pure, SSR-safe validation
+  timeToIndex, indexToTime, SCHEMA_VERSION, version,
+} from 'emberwick/drawings'
 ```
+
+`toNumber` (numbers and numeric strings pass; `null`, booleans and `''` are
+`NaN`, never `0`) and `DASH` are exported so a plugin coerces input and names a
+dash the same way the core does: `'dashed'` then means one thing across price
+lines, series and drawings.
 
 ---
 
 ## How the motion works
 
-Three independent mechanisms, which is why it reads as smooth rather than
+Four independent mechanisms, which is why it reads as smooth rather than
 merely animated:
 
 1. **Live candle** — each of O/H/L/C eases toward the incoming tick over
@@ -1049,13 +1751,23 @@ merely animated:
    so wheel zoom eases and new bars slide in. **Dragging deliberately does
    not ease** — easing a drag feels like lag, not polish.
 
+4. **Drawings** (only if you enable them) — a drawing's anchors never move by
+   themselves; what glides is a *residual* kept in data space (bars, price)
+   that decays to zero. Because it is in data units, a glide stays glued to the
+   candles even if the view zooms mid-animation. The exception is the drag:
+   a change of bar slot or magnet target is crisp, because a glide would trail
+   the pointer, which is the same reason dragging the time axis does not ease.
+   See [Motion](#motion) under Drawing tools.
+
 All of it runs through `Smoothed`, a frame-rate-independent exponential
 smoother: the same visual speed at 30fps and 144fps. The render loop returns
 whether anything is still animating, so a static chart idles at zero CPU.
 
 Rendering is split across three stacked canvases — `base` (grid + axes),
 `main` (candles + volume), `overlay` (crosshair) — so moving the pointer
-repaints only the crosshair, never the candles underneath. All contexts are
+repaints only the crosshair, never the candles underneath. (Attaching a
+plugin, drawings included, adds a fourth, `plugins`, between `main` and
+`overlay`.) All contexts are
 pre-scaled by `devicePixelRatio`, so drawing code works in CSS pixels and
 output stays crisp on retina.
 
@@ -1067,11 +1779,12 @@ The repo is both the library and its playground. The playground is an ordinary
 Vite app (`npm run dev` / `npm run build`); the library has its own builds.
 
 ```bash
-npm run build:lib    # ESM, multi-entry  -> dist-lib/{index,react,webcomponent}.js
-npm run build:umd    # minified UMD      -> dist-lib/umd/emberwick.umd.js
+npm run build:lib    # ESM, multi-entry  -> dist-lib/{index,react,webcomponent,drawings}.js
+npm run build:umd    # minified UMD      -> dist-lib/umd/{emberwick,emberwick-drawings}.umd.js
 npm run pack:lib     # manifest + README + .d.ts into dist-lib/
+npm run verify:package  # the assembled directory, checked as a consumer would use it
 npm run size         # gzipped size budget check
-npm run release      # all four, in order
+npm run release      # test, then all of the above, in order
 npm publish ./dist-lib   # publish the assembled directory — note the ./
 ```
 
@@ -1081,6 +1794,16 @@ npm publish ./dist-lib   # publish the assembled directory — note the ./
 Publishing from `dist-lib/` keeps the playground, the build configs and the
 app's private `package.json` out of the artifact. `package.lib.json` is the
 manifest that becomes the published `package.json`.
+
+Two guards keep drawings from leaking into the core, and the build is where
+they run. `verify:package` fails if `dist-lib/` contains a `chunks/` folder,
+which is what Rollup does when the two entries share a deep import: the
+drawings entry may import the core only through its public entry, and must bind
+`version` from it, a value defined there, not a re-export. And CI builds the
+core alone and compares it with the core from the full build: `index.js` and
+its source map must be **byte-identical**. `npm test` carries the source-level
+half of the same rules (`package-boundaries`: import boundaries, no
+module-scope DOM access, nothing newer than ES2019 in `src/drawings`).
 
 React is an **optional peer dependency**, external in every build — importing
 `emberwick` never pulls React in.
@@ -1096,9 +1819,15 @@ src/chart/                  the library core (zero deps, no framework)
   replay/    Replay (bar-by-bar playback)
   data/      DataFeed (the seam), RandomFeed
   index.js   public API surface   index.d.ts  types
+src/drawings/               drawing tools (imports only ../chart/index.js)
+  model/       schema and load report, time <-> fractional bar index, store, history
+  tools/       the nine ToolDefs
+  interaction/ hit-testing, snapping, the gesture state machine, keys, text editor
+  render/      scene painter, motion, drawing theme, shared paint helpers
+  Drawings.js  the controller (a chart plugin)   index.js  entry   index.d.ts  types
 src/adapters/react/         <EmberwickChart /> + dataPlan (framework-agnostic)
 src/adapters/webcomponent/  <emberwick-chart>
-src/pages/, src/App.jsx, src/styles.css   the playground (not published)
+src/pages/, src/components/, src/App.jsx, src/styles.css   the demo site (not published)
 test/                       node --test, no jsdom (not published)
 ```
 
@@ -1115,14 +1844,15 @@ Honest list of what isn't there yet:
   there is no drag-to-move or editing interaction.
 - **No indicator maths.** Emberwick draws the line you hand it — see
   [Series](#series) and [Panes](#panes) — but computing SMA/EMA/RSI/MACD is
-  yours. Drawing tools (trendlines, Fib) are not implemented.
+  yours. (Drawing tools exist now; see [Drawing tools](#drawing-tools).)
 - **Panes are not resizable or reorderable.** Heights come from `weight` and
   `minHeight` and are fixed at layout; there is no drag handle between bands,
   and no way to reweight or move a pane short of `removePane()` and adding it
   again — which drops every series routed to it.
-- **Annotations live on the price pane.** Markers, price lines and zones take
-  a time and a price and draw against the candles; there is no `pane` option
-  that would put a level at RSI 70.
+- **Markers, price lines and zones live on the price pane.** They take a time
+  and a price and draw against the candles; there is no `pane` option that
+  would put a level at RSI 70. *Drawings* do take a `pane`, so a horizontal
+  line at RSI 70 is a drawing on the `'rsi'` pane.
 - **Candlesticks only, as a price type.** No Heikin-Ashi, and no area or
   baseline fills — a series is a stroked line.
 - **No session awareness.** The time axis is indexed by bar, not by clock, so
@@ -1131,6 +1861,40 @@ Honest list of what isn't there yet:
   never collapsed *on purpose*, and there are no session bounds to fit or snap
   to. (Session boundaries are at least legible: the first axis label of each
   new day shows the date, in the configured zone.)
+- **Drawings: a minority of TradingView's tools.** No brush, callout,
+  pitchfork, Gann, fib extension or time zones. Each is a new geometry for a
+  minority of users, and the tool contract is the experimental part.
+- **Drawings: single selection.** The API is plural (`selection`, `select(ids)`)
+  so multi-select can arrive without a breaking change, but 0.12 holds one id.
+- **Drawings: no edge auto-pan.** Dragging a point past the plot edge does not
+  scroll the view. Held points are kept honest by re-deriving them every frame,
+  which covers a live tape moving under a still mouse.
+- **Drawings: no alerts.** `priceAt(id, time)` is the building block; the
+  alerting is yours.
+- **Drawings: no templates or favourites**, and text is plain: no rich text.
+- **Drawings: colours do not animate.** They change instantly in every motion
+  mode.
+- **Drawings: future points are bar counts.** A point past the newest bar is
+  "k bars after", so it cannot know a session calendar, and a weekend is one
+  bar wide there as it is everywhere else on the axis.
+- **Drawings are not keyed by symbol.** See the symbol-switch caveat under
+  [Saving and loading](#saving-and-loading).
+- **Drawings do not influence autoscale.** A line far outside the candles is
+  off screen until you scroll the price axis to it.
+- **Drawing angles are screen angles.** A 45° line is 45° at the zoom it was
+  drawn at, and is a different price-per-bar slope after a zoom.
+- **`toImage()` omits selection chrome and includes a standing crosshair.**
+  Committed drawings are exported at rest; handles, hover, previews and the
+  axis bands are not. A crosshair a tap left standing still is (as before).
+- **The plugin API is experimental**, and so is the `ToolDef` contract.
+- **One-finger pan is off while a drawing tool is armed on touch.** Two fingers
+  pan; disarm to pan with one.
+- **Locked drawings are selected by a click or tap, never dragged**, and the
+  chart pans through them.
+- **On touch, a selected box moves by its border or its move handle, not its
+  fill**, so a swipe over a box still pans.
+- **Fills yield to markers.** A trade marker inside a position box or fib stays
+  hoverable and clickable; strokes, handles and labels win over markers.
 - **`RandomFeed` deep history is per-page coherent, not one continuous walk** —
   each page re-seeds from its own start time and opens near the feed's `start`
   price rather than at the neighbouring page's close, so paging far left can
