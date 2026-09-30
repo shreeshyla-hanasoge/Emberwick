@@ -1,6 +1,6 @@
 {
   "name": "emberwick",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Smooth flowing candlestick charts for the web — canvas-rendered, zero-dependency, pluggable data feeds.",
   "license": "MIT",
   "author": "Shreeshyla Hanasoge <shreeshyla.hanasoge@gmail.com>",
@@ -34,6 +34,10 @@
       "types": "./webcomponent.d.ts",
       "import": "./webcomponent.js"
     },
+    "./drawings": {
+      "types": "./drawings.d.ts",
+      "import": "./drawings.js"
+    },
     "./package.json": "./package.json"
   },
   "peerDependencies": {
@@ -53,7 +57,10 @@
     "ohlc",
     "canvas",
     "realtime",
-    "tradingview-alternative"
+    "tradingview-alternative",
+    "drawing-tools",
+    "fibonacci",
+    "trendline"
   ],
   "engines": {
     "node": ">=18"

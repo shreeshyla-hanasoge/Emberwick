@@ -54,6 +54,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:lib
+      # "Drawings cost a core-only user nothing" is checked, not asserted: the
+      # core entry is rebuilt without the drawings entry and must match the
+      # shipped one byte for byte. If building drawings beside the core moves
+      # anything in index.js (a chunk split, a renamed binding, a hoisted
+      # module), this step is where it shows.
+      - name: Core is byte-identical with and without the drawings entry
+        run: |
+          EMBERWICK_CORE_ONLY=1 npx vite build --config vite.lib.config.js --outDir dist-core-check
+          cmp dist-core-check/index.js dist-lib/index.js
+          rm -rf dist-core-check
       - run: npm run build:umd
       - run: npm run pack:lib
       # Catches a tarball whose manifest advertises files the build dropped —
@@ -73,7 +83,11 @@ jobs:
             if (typeof core.createChart !== 'function') throw new Error('core entry is broken')
             const wc = await import('./webcomponent.js')
             if (typeof wc.register !== 'function') throw new Error('webcomponent entry is broken')
-            console.log('both entries import with no DOM; version', core.version)
+            const dr = await import('./drawings.js')
+            if (typeof dr.enableDrawings !== 'function') throw new Error('drawings entry is broken')
+            const r = dr.normalizeDrawings([{ type: 'trendLine', points: [{ time: 1, price: '2' }, { time: 2, price: 3 }] }])
+            if (r.drawings.length !== 1 || r.report.loaded !== 1) throw new Error('normalizeDrawings is not pure/SSR-safe')
+            console.log('core, webcomponent and drawings entries import with no DOM; version', core.version)
           "
 
       - name: What would be published

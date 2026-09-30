@@ -3,15 +3,35 @@ import { defineConfig } from 'vite'
 /**
  * Library build — ESM, multi-entry.
  *
- * Three public entries, so a consumer who only wants the core never pays for
- * the React adapter (and vice versa):
+ * Four public entries, so a consumer who only wants the core never pays for
+ * the React adapter or the drawing tools (and vice versa):
  *
  *   emberwick                 -> src/chart/index.js
  *   emberwick/react           -> src/adapters/react/index.js
  *   emberwick/webcomponent    -> src/adapters/webcomponent/index.js
+ *   emberwick/drawings        -> src/drawings/index.js
+ *
+ * The drawings entry imports the core through `./index.js` and nothing else.
+ * That only holds while it binds a value DEFINED in src/chart/index.js (its
+ * `version`): an entry that imported re-exports alone would make Rollup hoist
+ * the shared core modules into chunks/, and the core would stop being one
+ * self-contained file. `verify-package` fails the release if chunks/ appears.
+ *
+ * EMBERWICK_CORE_ONLY=1 builds without the drawings entry. It exists for one
+ * reason: CI builds the core both ways and `cmp`s the two index.js files, which
+ * is the proof that adding drawings changed nothing a core-only user ships.
+ * Nothing else should set it.
  *
  * Run with: npm run build:lib
  */
+const entry = {
+  index: 'src/chart/index.js',
+  react: 'src/adapters/react/index.js',
+  webcomponent: 'src/adapters/webcomponent/index.js',
+  drawings: 'src/drawings/index.js',
+}
+if (process.env.EMBERWICK_CORE_ONLY === '1') delete entry.drawings
+
 export default defineConfig({
   build: {
     outDir: 'dist-lib',
@@ -20,11 +40,7 @@ export default defineConfig({
     minify: false, // consumers minify; readable output helps debugging
     target: 'es2019',
     lib: {
-      entry: {
-        index: 'src/chart/index.js',
-        react: 'src/adapters/react/index.js',
-        webcomponent: 'src/adapters/webcomponent/index.js',
-      },
+      entry,
       formats: ['es'],
     },
     rollupOptions: {

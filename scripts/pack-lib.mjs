@@ -42,15 +42,25 @@ const types = [
   ['src/chart/index.d.ts', 'index.d.ts'],
   ['src/adapters/react/index.d.ts', 'react.d.ts'],
   ['src/adapters/webcomponent/index.d.ts', 'webcomponent.d.ts'],
+  ['src/drawings/index.d.ts', 'drawings.d.ts'],
 ]
 for (const [from, to] of types) {
   const src = resolve(root, from)
   if (!existsSync(src)) continue
   let text = await readFile(src, 'utf8')
-  // the flattened layout puts everything at the package root
+  // The flattened layout puts everything at the package root. Adapters sit two
+  // levels below src/, drawings one; both point at the core entry. The leading
+  // quote in each pattern is what keeps the one-level rewrite from matching
+  // inside '../../chart/index.js'.
   text = text
     .replace(/from '\.\.\/\.\.\/chart\/index\.js'/g, "from './index.js'")
     .replace(/from "\.\.\/\.\.\/chart\/index\.js"/g, 'from "./index.js"')
+    .replace(/from '\.\.\/chart\/index\.js'/g, "from './index.js'")
+    .replace(/from "\.\.\/chart\/index\.js"/g, 'from "./index.js"')
+    // Inline type references (`import('../chart/index.js').Chart`) are the
+    // other way a hand-written .d.ts reaches the core; left as they are, they
+    // point outside the published package and every such type becomes `any`.
+    .replace(/import\((['"])(?:\.\.\/){1,2}chart\/index\.js\1\)/g, 'import($1./index.js$1)')
   const dest = resolve(out, to)
   await mkdir(dirname(dest), { recursive: true })
   await writeFile(dest, text)
