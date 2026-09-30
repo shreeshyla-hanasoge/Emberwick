@@ -199,7 +199,10 @@ const CORE_MUTANTS = [
     name: 'The web component extends HTMLElement unconditionally',
     file: 'src/adapters/webcomponent/EmberwickChartElement.js',
     find: "const ElementBase = typeof HTMLElement !== 'undefined' ? HTMLElement : class {}",
-    replace: 'const ElementBase = HTMLElement',
+    // globalThis.HTMLElement, not the bare name: a bare HTMLElement fails an SSR
+    // import with a ReferenceError, which the harness rightly refuses to count
+    // as a catch (INVALID). This one fails as `class extends undefined`.
+    replace: 'const ElementBase = globalThis.HTMLElement',
   },
   {
     name: 'Zoom lock applies to every following chart again',
