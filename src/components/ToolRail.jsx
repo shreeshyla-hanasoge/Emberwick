@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { TOOL_PRESETS } from '../drawings/index.js'
 import { Icon } from './Icons.jsx'
 
@@ -25,11 +25,18 @@ const GROUP_LABEL = {
  * `sticky` is the reader's preference, kept by the host: the `tool` event only
  * reports stickiness for an ARMED tool, so it cannot remember the choice across
  * a disarm. `names` narrows the rail (the landing page shows six).
+ *
+ * `labels` puts a word under each glyph: `true` uses the library's own preset
+ * labels, an object maps a preset name to a shorter one (and 'cursor' too).
+ * The pill measures the button it lands on instead of assuming a square, so
+ * it fits either way, and it is re-measured when the rail resizes (a webfont
+ * arriving, the labels being hidden at a narrow width).
  */
-export default function ToolRail({ dc, tool, sticky = false, names, orientation = 'vertical' }) {
+export default function ToolRail({ dc, tool, sticky = false, names, orientation = 'vertical', labels = false, className = '' }) {
   const active = tool.tool || 'cursor'
   const btn = useRef({})
   const pill = useRef(null)
+  const inner_ = useRef(null)
   const [tip, setTip] = useState(null)
 
   const groups = useMemo(() => {
@@ -44,16 +51,30 @@ export default function ToolRail({ dc, tool, sticky = false, names, orientation 
     return out
   }, [names])
 
-  // Layout effect: the pill has to be at the new button before the browser
-  // paints, or the first frame shows it on the old one and it slides from there.
-  useLayoutEffect(() => {
+  const seat = useCallback(() => {
     const el = btn.current[active]
     const p = pill.current
     if (!p) return
     if (!el) { p.style.opacity = '0'; return }
+    p.style.width = `${el.offsetWidth}px`
+    p.style.height = `${el.offsetHeight}px`
     p.style.transform = `translate(${el.offsetLeft}px, ${el.offsetTop}px)`
     p.style.opacity = '1'
-  }, [active, orientation, groups])
+  }, [active])
+
+  // Layout effect: the pill has to be at the new button before the browser
+  // paints, or the first frame shows it on the old one and it slides from there.
+  useLayoutEffect(seat, [seat, orientation, groups, labels])
+
+  // Buttons change size without `active` changing (labels hide at a narrow
+  // width, a font arrives), and the pill would be left at the old size.
+  useEffect(() => {
+    const inner = inner_.current
+    if (!inner || typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(() => seat())
+    ro.observe(inner)
+    return () => ro.disconnect()
+  }, [seat])
 
   const pick = (name) => {
     if (!dc) return
@@ -70,6 +91,8 @@ export default function ToolRail({ dc, tool, sticky = false, names, orientation 
     )
   }
 
+  const word = (name, label) => (labels && typeof labels === 'object' && labels[name]) || label
+
   const button = (name, label, icon = name) => (
     <button
       key={name}
@@ -85,12 +108,17 @@ export default function ToolRail({ dc, tool, sticky = false, names, orientation 
       onBlur={() => setTip(null)}
     >
       <Icon name={icon} size={19} />
+      {labels && <span className="rail-lbl" aria-hidden="true">{word(name, name === 'cursor' ? 'Select' : label)}</span>}
     </button>
   )
 
   return (
-    <nav className={`rail rail-${orientation}`} aria-label="Drawing tools" onScroll={() => setTip(null)}>
-      <div className="rail-inner">
+    <nav
+      className={`rail rail-${orientation}${labels ? ' rail-labeled' : ''}${className ? ` ${className}` : ''}`}
+      aria-label="Drawing tools"
+      onScroll={() => setTip(null)}
+    >
+      <div className="rail-inner" ref={inner_}>
         <span className="rail-pill" ref={pill} aria-hidden="true" />
         {button('cursor', 'Cursor: select and pan')}
         {groups.map((g) => (

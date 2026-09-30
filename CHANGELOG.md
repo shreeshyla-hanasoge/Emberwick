@@ -45,7 +45,7 @@ absent from your bundle until you import them.
     candles.
   - **Opt-in, with the measured sizes.** No drawing code is in the core, and CI
     proves the core entry is byte-identical with and without the drawings
-    entry. The drawings are 70.7 KB gzipped as unminified ESM and 52.3 KB as
+    entry. The drawings are 71.9 KB gzipped as unminified ESM and 52.8 KB as
     the minified UMD (`emberwick-drawings.umd.js`, global `EmberwickDrawings`,
     loaded after the core), and only when imported. That is a large number
     next to a 20 KB core; `createDrawings(chart, { tools })` lets a bundler

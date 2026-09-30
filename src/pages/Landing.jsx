@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createChart, RandomFeed, defaultTheme, version } from '../chart/index.js'
 import { enableDrawings } from '../drawings/index.js'
 import BrandLogo from '../components/BrandLogo.jsx'
-import { Icon } from '../components/Icons.jsx'
+import DrawingsShowcase from '../components/DrawingsDemo.jsx'
 import ToolRail from '../components/ToolRail.jsx'
 import { useDrawings } from '../components/useDrawings.js'
-import { starterDrawings } from '../components/starterDrawings.js'
+import { pickScenes } from '../components/scenes.js'
 
 const NPM_URL = 'https://www.npmjs.com/package/emberwick'
 const CDN_URL = 'https://unpkg.com/emberwick/umd/emberwick.umd.js'
@@ -25,18 +25,55 @@ function spanLabel(r) {
   return `${h}h ${String(m).padStart(2, '0')}m on screen`
 }
 
+/** Tools on the hero's title bar: a short rail, so the chart reads as drawable without a toolbar's weight. */
+const HERO_RAIL = ['trendLine', 'fibRetracement', 'long', 'rectangle']
+
 function HeroChart() {
   const hostRef = useRef(null)
+  const wrapRef = useRef(null)
+  const feedRef = useRef(null)
+  const armedRef = useRef(false)
+  const seenRef = useRef(true)
   const [ready, setReady] = useState(false)
   const [range, setRange] = useState(null)
+  const [dc, setDc] = useState(null)
+  const [intro, setIntro] = useState(false)
+  const [tried, setTried] = useState(false)
+  const { tool } = useDrawings(dc)
+
+  // The live tape stops while a tool is armed (a line cannot be placed on a
+  // chart that scrolls away under the pointer) and while the hero is off screen
+  // (nobody is watching it, and the page has five more charts to run).
+  const syncFeed = () => {
+    const f = feedRef.current
+    if (f) f.setPaused(armedRef.current || !seenRef.current)
+  }
+
+  useEffect(() => {
+    armedRef.current = !!tool.tool
+    if (tool.tool) setTried(true)
+    syncFeed()
+  }, [tool.tool])
 
   useEffect(() => {
     let disposed = false
-    const chart = createChart(hostRef.current, {
+    const timers = []
+    const host = hostRef.current
+    const phone = host.clientWidth < 560
+    const spacing = phone ? 5 : 7
+    const offset = phone ? 10 : 14
+    // Bars of data in view, worked out from what the chart was made with:
+    // right after setFeed() the view is still easing in and visibleRange()
+    // would report the window it has reached so far.
+    const fits = Math.floor((host.clientWidth - 72) / spacing) - offset
+    const chart = createChart(host, {
       theme: { ...defaultTheme, background: '#0a0d15' },
       initialBars: 600,
-      timeScale: { spacing: 7, rightOffset: 14 },
+      timeScale: { spacing, rightOffset: offset },
     })
+    // Enabled right after the chart, destroyed before it: see Playground.
+    const d = enableDrawings(chart)
+    setDc(d)
     const feed = new RandomFeed({
       symbol: 'EMBR',
       timeframe: 60000,
@@ -45,6 +82,7 @@ function HeroChart() {
       ticksPerSecond: 10,
       speed: 40,
     })
+    feedRef.current = feed
 
     // The readout below is the 'visibleRange' event, unfiltered: it is called
     // once immediately with the current window and then only when that window
@@ -53,30 +91,69 @@ function HeroChart() {
       if (!disposed) setRange(r)
     })
 
-    chart.setFeed(feed).then(() => { if (!disposed) setReady(true) })
+    // Before the first frame is seen the page is not "off screen", it is unseen
+    // yet: the observer below settles it.
+    let io = null
+    if (typeof IntersectionObserver !== 'undefined') {
+      io = new IntersectionObserver(([e]) => {
+        seenRef.current = e.isIntersecting
+        syncFeed()
+      })
+      io.observe(wrapRef.current)
+    }
+
+    chart.setFeed(feed).then(() => {
+      if (disposed) return
+      setReady(true)
+      syncFeed()
+
+      // A trend line and a fib found in the bars just loaded, put on one after
+      // another as if drawn: the same add(..., { animate: true }) your code has.
+      // It gives way the moment the reader picks a tool or presses the chart.
+      const scene = pickScenes(chart.bars, { window: Math.max(30, Math.min(140, fits - 6)) })
+      // a trend line and a fib: the position and its four labels are in the
+      // drawings section, where there is room to read them
+      const rows = [scene.trend, scene.fib].filter(Boolean)
+      const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+      const stop = () => { timers.forEach(clearTimeout); timers.length = 0 }
+      host.addEventListener('pointerdown', stop, { once: true, capture: true })
+      rows.forEach((row, i) => {
+        timers.push(setTimeout(() => {
+          if (disposed || armedRef.current) return
+          try { d.add(row, { history: false, animate: !reduced }) } catch (e) { /* a repeat id: skip it */ }
+          if (i === rows.length - 1) setIntro(true)
+        }, reduced ? 0 : 900 + i * 900))
+      })
+    })
 
     return () => {
       disposed = true
+      timers.forEach(clearTimeout)
+      if (io) io.disconnect()
       offRange()
+      d.destroy()
       feed.destroy()
       chart.destroy()
+      feedRef.current = null
     }
   }, [])
 
   return (
-    <div className="lp-chartwrap">
-      <div className="lp-chartbar">
+    <div className="lp-chartwrap" ref={wrapRef}>
+      <div className="lp-chartbar lp-chartbar-tools">
         <span className="lp-dot lp-dot-a" />
         <span className="lp-dot lp-dot-b" />
         <span className="lp-dot lp-dot-c" />
-        <span className="lp-chartbar-title">EMBR · 1m · live</span>
+        <span className="lp-chartbar-title">EMBR · 1m · {tool.tool ? 'paused while you draw' : 'live'}</span>
+        <ToolRail dc={dc} tool={tool} names={HERO_RAIL} orientation="horizontal" className={`rail-bar${intro && !tried ? ' rail-nudge' : ''}`} />
       </div>
       <div className="lp-chart" ref={hostRef}>
         {!ready && <div className="lp-chart-loading">generating market…</div>}
       </div>
       <div className="lp-chartfoot">
         <p className="lp-chart-hint">
-          drag to pan — throw it and it glides · wheel to zoom · double-click to reset
+          drag to pan — throw it and it glides · wheel to zoom · double-click to reset ·{' '}
+          <b>draw on it with the tools above</b>
         </p>
         {range && range.barCount > 0 && (
           <span className="lp-rangeread" title="live payload from subscribe('visibleRange')">
@@ -86,150 +163,6 @@ function HeroChart() {
             {spanLabel(range)}
           </span>
         )}
-      </div>
-    </div>
-  )
-}
-
-/* -------------------------------------------------------------- drawings -- */
-/**
- * Drawing tools on a fed chart, on purpose not a static one.
- *
- * The chart has a RandomFeed attached (its live ticks are switched off) so
- * that panning left pages older history in through the chart's own lazy
- * loader, which is the real "history prepend" the drawings must survive. The
- * two buttons are the same proof made on demand: `setData()` with a fresh copy
- * of the bars, and the same call with 120 older bars in front. After each, the
- * view is put back on the same candles, so what you see is the drawings NOT
- * moving while every bar index under them changed.
- *
- * The starter drawings are found in the bars (see starterDrawings) and go in
- * as a load: not undoable, no `change` event, so Undo starts empty.
- */
-const RAIL = ['trendLine', 'fibRetracement', 'long', 'measure', 'rectangle', 'text']
-
-function DrawingsChart() {
-  const hostRef = useRef(null)
-  const chartRef = useRef(null)
-  const feedRef = useRef(null)
-  const [dc, setDc] = useState(null)
-  const [ready, setReady] = useState(false)
-  const [last, setLast] = useState(null)
-  const [proof, setProof] = useState(null)
-  const { tool, history, selected } = useDrawings(dc)
-
-  useEffect(() => {
-    let disposed = false
-    const chart = createChart(hostRef.current, {
-      theme: { ...defaultTheme, background: '#0a0d15' },
-      timeScale: { spacing: 8, rightOffset: 8 },
-      priceScale: { marginTop: 0.16, marginBottom: 0.14 },
-    })
-    chartRef.current = chart
-    // Enabled right after the chart, destroyed before it: see Playground.
-    const d = enableDrawings(chart)
-    setDc(d)
-
-    const feed = new RandomFeed({
-      symbol: 'EMBR',
-      timeframe: 60000,
-      seed: 90210,
-      start: 118.6,
-      volatility: 0.0024,
-      speed: 60,
-    })
-    feedRef.current = feed
-
-    const offChange = d.subscribe('change', (p) => {
-      if (!disposed) setLast(`change · ${p.source} · ${p.reason}`)
-    })
-
-    chart.setFeed(feed).then(() => {
-      if (disposed) return
-      // The tape is for drawing on, not watching: stop the ticks so a line
-      // does not scroll away while the reader is still placing it.
-      feed.setPaused(true)
-      chart.snapToRealtime()
-      const set = starterDrawings(chart.bars, { window: 130 })
-      d.setDrawings(set)
-      setReady(true)
-    })
-
-    return () => {
-      disposed = true
-      offChange()
-      d.destroy()
-      feed.destroy()
-      chart.destroy()
-      chartRef.current = null
-      feedRef.current = null
-    }
-  }, [])
-
-  // Put the view back on the same candles after the bar array was replaced.
-  const holdView = (c, shift, run) => {
-    const r = c.visibleRange()
-    run()
-    if (r) c.setVisibleRange({ from: r.from + shift, to: r.to + shift })
-  }
-
-  const reload = () => {
-    const c = chartRef.current
-    if (!c || !c.bars.length) return
-    holdView(c, 0, () => c.setData(c.bars.map((b) => ({ ...b }))))
-    setProof('setData() with a fresh copy of the bars. Every anchor re-resolved by time; nothing moved.')
-  }
-
-  const prepend = async () => {
-    const c = chartRef.current
-    const feed = feedRef.current
-    if (!c || !feed || !c.bars.length) return
-    const older = await feed.getBars({ symbol: 'EMBR', timeframe: 60000, to: c.bars[0].time, limit: 120 })
-    if (!chartRef.current || !older.length) return
-    const k = older.length
-    holdView(c, k, () => c.setData(older.concat(c.bars)))
-    setProof(`${k} older bars in front. Every bar index shifted by ${k}; the drawings did not.`)
-  }
-
-  const hint = selected
-    ? `${selected.type} selected · drag a handle to reshape it · Del removes it · Ctrl/Cmd+Z undoes`
-    : 'pick a tool, then click or drag on the chart · or drag the fib, the line or the box that is already there'
-
-  return (
-    <div className="lp-annochart">
-      <div className="lp-chartwrap">
-        <div className="lp-chartbar">
-          <span className="lp-dot lp-dot-a" />
-          <span className="lp-dot lp-dot-b" />
-          <span className="lp-dot lp-dot-c" />
-          <span className="lp-chartbar-title">EMBR · 1m · drawn on</span>
-        </div>
-        <div className="lp-drawstage">
-          <ToolRail dc={dc} tool={tool} names={RAIL} orientation="horizontal" />
-          <div className="lp-chart lp-chart-sm" ref={hostRef}>
-            {!ready && <div className="lp-chart-loading">finding the swings…</div>}
-          </div>
-        </div>
-      </div>
-
-      <div className="lp-serieslegend">
-        <button type="button" className="lp-serieschip is-on" onClick={reload}>
-          <Icon name="refresh" size={13} /> Reload data
-        </button>
-        <button type="button" className="lp-serieschip is-on" onClick={prepend}>
-          <Icon name="back" size={13} /> Prepend history
-        </button>
-        <button type="button" className="lp-serieschip is-on" disabled={!history.canUndo} onClick={() => dc && dc.undo()}>
-          <Icon name="undo" size={13} /> Undo
-        </button>
-        <button type="button" className="lp-serieschip is-on" disabled={!history.canRedo} onClick={() => dc && dc.redo()}>
-          <Icon name="redo" size={13} /> Redo
-        </button>
-      </div>
-
-      <div className={`lp-annoread ${proof || last ? 'is-on' : ''}`}>
-        <span className="lp-annoread-t">{proof || last || 'nothing has changed yet'}</span>
-        <span className="lp-annoread-s">{hint}</span>
       </div>
     </div>
   )
@@ -1229,62 +1162,62 @@ export default function Landing() {
         <VersionTag v="0.12.0" />
         <h2>Draw, and it stays drawn</h2>
         <p className="lp-lede">
-          Trendlines, Fibonacci, channels, ranges and positions, pinned to time
-          and price rather than to pixels. Reload the data, prepend history,
-          change the timeframe: the line is where you left it. Snapped where you
-          mean, undoable, and absent from your bundle until you import it.
+          Smart: it snaps to the candle you mean, reads the bars for a position&rsquo;s
+          outcome, and hands you its state as plain data. Liquid: it glides, stays
+          pinned to time and price through a reload or a history prepend, and undo
+          glides back instead of jumping. It draws itself below. Pick a tool and take
+          over.
         </p>
 
-        <div className="lp-annogrid">
-          <DrawingsChart />
+        <DrawingsShowcase />
 
-          <div className="lp-code lp-annocode">
-            <div className="lp-codehead">Enabling drawings</div>
-            <pre>{`import { createChart } from 'emberwick'
-import { enableDrawings } from 'emberwick/drawings'
-
-const chart = createChart(el)
-const drawings = enableDrawings(chart)
-
-// once per commit: never per drag frame,
-// never for a load
-drawings.subscribe('change', debounce(() =>
-  save(drawings.getDrawings()), 400))
-
-// a load, not an edit: no change event,
-// no undo entry, and a report of what it kept
-const report = drawings.setDrawings(await load())
-
-drawings.setTool('fibRetracement')`}</pre>
-          </div>
-        </div>
-
-        <div className="lp-annofacts lp-annofacts-4">
+        <div className="lp-annofacts">
           <div className="lp-annofact">
-            <h3>Pinned to time and price, not pixels</h3>
+            <h3>Snaps where you mean</h3>
+            <p>
+              To a candle&rsquo;s open, high, low or close with the crosshair&rsquo;s
+              own magnet and reach, to other drawings&rsquo; anchors, to fib levels
+              and price lines. Drag a line and the readout under the chart says what
+              it landed on. <code>Shift</code> holds 45&deg;, <code>Alt</code> frees
+              the point, <code>Ctrl</code>/<code>&#8984;</code> flips the magnet.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Reads the bars</h3>
+            <p>
+              A long is entry, target and stop, and its label reads R:R. Once the
+              bars after the entry reach the target or the stop it says which, and
+              a stop on the wrong side turns both zones magenta instead of being
+              quietly corrected. Only revealed bars are read, so a replay never
+              leaks the outcome early.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Pinned to time and price</h3>
             <p>
               An anchor is <code>{'{ time, price }'}</code>. A point past the
               newest bar is stored as a bar count from it, so it survives session
               gaps and appended bars. Zoom, pan, <code>setData</code>, a history
-              prepend and replay all leave it where it was.
-            </p>
-          </div>
-          <div className="lp-annofact">
-            <h3>Snaps where you mean</h3>
-            <p>
-              To a candle&rsquo;s open, high, low and close with the crosshair&rsquo;s
-              own magnet and reach, to other drawings&rsquo; anchors, to fib levels
-              and price lines. <code>Shift</code> holds 45&deg;, <code>Alt</code> frees
-              the point, <code>Ctrl</code>/<code>&#8984;</code> flips the magnet.
+              prepend and replay all leave it where it was. The receipt under the
+              demo is measured, not asserted.
             </p>
           </div>
           <div className="lp-annofact">
             <h3>Undo you can watch</h3>
             <p>
-              Undo is per drawing, so it never clobbers an edit to another one,
-              and what it restores glides back instead of jumping. The motion is in
+              Undo is per drawing, so it never clobbers an edit to another one, and
+              what it restores glides back instead of jumping. The motion is in
               data space, so it stays glued to the candles even if you zoom
               mid-glide, and it honours reduced motion.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Saved as data</h3>
+            <p>
+              One plain JSON row per drawing, each with its own schema version.
+              <code>setDrawings()</code> loads them back with a report of what it
+              kept, renamed, rejected and carried, and a row from a newer build is
+              written back untouched. Open the second tab above to read one.
             </p>
           </div>
           <div className="lp-annofact">
@@ -1292,8 +1225,8 @@ drawings.setTool('fibRetracement')`}</pre>
             <p>
               <code>emberwick/drawings</code> is its own entry. The core entry is
               byte-identical with or without it; the generic plugin seam is +4.2&nbsp;KB
-              gzipped in the core ESM. The drawings themselves are 52.3&nbsp;KB
-              gzipped as a minified UMD (70.7&nbsp;KB as unminified ESM), and only
+              gzipped in the core ESM. The drawings themselves are 52.8&nbsp;KB
+              gzipped as a minified UMD (71.9&nbsp;KB as unminified ESM), and only
               when you import them.
             </p>
           </div>

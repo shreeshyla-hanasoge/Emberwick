@@ -101,7 +101,7 @@ as-is.
 | `emberwick` | The core: `createChart`, `Chart`, feeds, themes, motion primitives |
 | `emberwick/react` | `<EmberwickChart />` React component |
 | `emberwick/webcomponent` | Registers `<emberwick-chart>` (side-effecting import) |
-| `emberwick/drawings` | Drawing tools: `enableDrawings`, `createDrawings`, the nine tools, `normalizeDrawings`. 52.3 KB gzipped as the minified UMD, 70.7 KB as unminified ESM, and only when you import it |
+| `emberwick/drawings` | Drawing tools: `enableDrawings`, `createDrawings`, the nine tools, `normalizeDrawings`. 52.8 KB gzipped as the minified UMD, 71.9 KB as unminified ESM, and only when you import it |
 
 TypeScript declarations ship for all four entries. The UMD build is not an
 import specifier — it is a file you point a `<script>` tag or a CDN at.
@@ -1282,7 +1282,7 @@ Stated plainly, with numbers measured by `npm run size` (gzipped):
   comments, and the gesture handling is where the comments are. With no plugin
   attached it costs **nothing at runtime**: three canvases, and one length check
   per input hook.
-- **The drawings cost 70.7 KB as unminified ESM and 52.3 KB as the minified
+- **The drawings cost 71.9 KB as unminified ESM and 52.8 KB as the minified
   UMD**, only when you import them. That is a large number next to a 20 KB core,
   and it is the honest one: nine tools, a snap pipeline, a state machine, an
   undo history, a motion system and a schema loader are not small. `createDrawings`
