@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createChart, RandomFeed, defaultTheme, version } from '../chart/index.js'
+import { enableDrawings } from '../drawings/index.js'
 import BrandLogo from '../components/BrandLogo.jsx'
+import { Icon } from '../components/Icons.jsx'
+import ToolRail from '../components/ToolRail.jsx'
+import { useDrawings } from '../components/useDrawings.js'
+import { starterDrawings } from '../components/starterDrawings.js'
 
 const NPM_URL = 'https://www.npmjs.com/package/emberwick'
 const CDN_URL = 'https://unpkg.com/emberwick/umd/emberwick.umd.js'
@@ -81,6 +86,150 @@ function HeroChart() {
             {spanLabel(range)}
           </span>
         )}
+      </div>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------- drawings -- */
+/**
+ * Drawing tools on a fed chart, on purpose not a static one.
+ *
+ * The chart has a RandomFeed attached (its live ticks are switched off) so
+ * that panning left pages older history in through the chart's own lazy
+ * loader, which is the real "history prepend" the drawings must survive. The
+ * two buttons are the same proof made on demand: `setData()` with a fresh copy
+ * of the bars, and the same call with 120 older bars in front. After each, the
+ * view is put back on the same candles, so what you see is the drawings NOT
+ * moving while every bar index under them changed.
+ *
+ * The starter drawings are found in the bars (see starterDrawings) and go in
+ * as a load: not undoable, no `change` event, so Undo starts empty.
+ */
+const RAIL = ['trendLine', 'fibRetracement', 'long', 'measure', 'rectangle', 'text']
+
+function DrawingsChart() {
+  const hostRef = useRef(null)
+  const chartRef = useRef(null)
+  const feedRef = useRef(null)
+  const [dc, setDc] = useState(null)
+  const [ready, setReady] = useState(false)
+  const [last, setLast] = useState(null)
+  const [proof, setProof] = useState(null)
+  const { tool, history, selected } = useDrawings(dc)
+
+  useEffect(() => {
+    let disposed = false
+    const chart = createChart(hostRef.current, {
+      theme: { ...defaultTheme, background: '#0a0d15' },
+      timeScale: { spacing: 8, rightOffset: 8 },
+      priceScale: { marginTop: 0.16, marginBottom: 0.14 },
+    })
+    chartRef.current = chart
+    // Enabled right after the chart, destroyed before it: see Playground.
+    const d = enableDrawings(chart)
+    setDc(d)
+
+    const feed = new RandomFeed({
+      symbol: 'EMBR',
+      timeframe: 60000,
+      seed: 90210,
+      start: 118.6,
+      volatility: 0.0024,
+      speed: 60,
+    })
+    feedRef.current = feed
+
+    const offChange = d.subscribe('change', (p) => {
+      if (!disposed) setLast(`change · ${p.source} · ${p.reason}`)
+    })
+
+    chart.setFeed(feed).then(() => {
+      if (disposed) return
+      // The tape is for drawing on, not watching: stop the ticks so a line
+      // does not scroll away while the reader is still placing it.
+      feed.setPaused(true)
+      chart.snapToRealtime()
+      const set = starterDrawings(chart.bars, { window: 130 })
+      d.setDrawings(set)
+      setReady(true)
+    })
+
+    return () => {
+      disposed = true
+      offChange()
+      d.destroy()
+      feed.destroy()
+      chart.destroy()
+      chartRef.current = null
+      feedRef.current = null
+    }
+  }, [])
+
+  // Put the view back on the same candles after the bar array was replaced.
+  const holdView = (c, shift, run) => {
+    const r = c.visibleRange()
+    run()
+    if (r) c.setVisibleRange({ from: r.from + shift, to: r.to + shift })
+  }
+
+  const reload = () => {
+    const c = chartRef.current
+    if (!c || !c.bars.length) return
+    holdView(c, 0, () => c.setData(c.bars.map((b) => ({ ...b }))))
+    setProof('setData() with a fresh copy of the bars. Every anchor re-resolved by time; nothing moved.')
+  }
+
+  const prepend = async () => {
+    const c = chartRef.current
+    const feed = feedRef.current
+    if (!c || !feed || !c.bars.length) return
+    const older = await feed.getBars({ symbol: 'EMBR', timeframe: 60000, to: c.bars[0].time, limit: 120 })
+    if (!chartRef.current || !older.length) return
+    const k = older.length
+    holdView(c, k, () => c.setData(older.concat(c.bars)))
+    setProof(`${k} older bars in front. Every bar index shifted by ${k}; the drawings did not.`)
+  }
+
+  const hint = selected
+    ? `${selected.type} selected · drag a handle to reshape it · Del removes it · Ctrl/Cmd+Z undoes`
+    : 'pick a tool, then click or drag on the chart · or drag the fib, the line or the box that is already there'
+
+  return (
+    <div className="lp-annochart">
+      <div className="lp-chartwrap">
+        <div className="lp-chartbar">
+          <span className="lp-dot lp-dot-a" />
+          <span className="lp-dot lp-dot-b" />
+          <span className="lp-dot lp-dot-c" />
+          <span className="lp-chartbar-title">EMBR · 1m · drawn on</span>
+        </div>
+        <div className="lp-drawstage">
+          <ToolRail dc={dc} tool={tool} names={RAIL} orientation="horizontal" />
+          <div className="lp-chart lp-chart-sm" ref={hostRef}>
+            {!ready && <div className="lp-chart-loading">finding the swings…</div>}
+          </div>
+        </div>
+      </div>
+
+      <div className="lp-serieslegend">
+        <button type="button" className="lp-serieschip is-on" onClick={reload}>
+          <Icon name="refresh" size={13} /> Reload data
+        </button>
+        <button type="button" className="lp-serieschip is-on" onClick={prepend}>
+          <Icon name="back" size={13} /> Prepend history
+        </button>
+        <button type="button" className="lp-serieschip is-on" disabled={!history.canUndo} onClick={() => dc && dc.undo()}>
+          <Icon name="undo" size={13} /> Undo
+        </button>
+        <button type="button" className="lp-serieschip is-on" disabled={!history.canRedo} onClick={() => dc && dc.redo()}>
+          <Icon name="redo" size={13} /> Redo
+        </button>
+      </div>
+
+      <div className={`lp-annoread ${proof || last ? 'is-on' : ''}`}>
+        <span className="lp-annoread-t">{proof || last || 'nothing has changed yet'}</span>
+        <span className="lp-annoread-s">{hint}</span>
       </div>
     </div>
   )
@@ -395,7 +544,7 @@ function SeriesChart() {
  * instruments never trade through.
  */
 /** The release whose tag is accented. Everything else reads "since". */
-const CURRENT_RELEASE = '0.10.0'
+const CURRENT_RELEASE = '0.12.0'
 
 const ZONES = [
   { id: 'Asia/Kolkata', label: 'Mumbai' },
@@ -779,7 +928,7 @@ function CopyLine({ text }) {
 }
 
 const STATS = [
-  { v: '15.8', u: 'KB', l: 'gzipped UMD core' },
+  { v: '20.3', u: 'KB', l: 'gzipped UMD core' },
   { v: '0', u: '', l: 'dependencies' },
   { v: '60', u: 'fps', l: 'with a live feed' },
   { v: 'MIT', u: '', l: 'licensed' },
@@ -791,6 +940,22 @@ const SHAPES = [
 ]
 
 const FEATURES = [
+  {
+    t: 'Drawing tools',
+    d: 'Trendlines, rays, channels, rectangles, Fibonacci, measure, long and short positions and text, anchored to time and price so they hold through zoom, pan, reloads and history prepends. A separate entry: a chart that never imports it carries none of the code.',
+  },
+  {
+    t: 'Saved as data',
+    d: 'getDrawings() returns plain JSON, one row per drawing with its own schema version, and setDrawings() loads it back with a report of what it kept, renamed, rejected and carried. A row from a newer build is written back untouched, never destroyed.',
+  },
+  {
+    t: 'Drawn with a finger',
+    d: 'Tap to select, then drag by a handle. One finger draws while a tool is armed, two fingers pan and pinch, and a fill never steals a swipe, so a phone-sized chart stays scrollable however many boxes are on it.',
+  },
+  {
+    t: 'A plugin seam',
+    d: 'chart.addPlugin() gives an opt-in layer its own canvas and the first offer of every gesture. Drawings are built on it, so can yours be. Experimental, and measured: +4.2 KB gzipped in the core ESM, and nothing at all while no plugin is attached.',
+  },
   {
     t: 'Motion, not repaints',
     d: 'Every incoming tick eases into the forming candle over ~55ms. The price axis glides to new bounds instead of snapping. Zoom is cursor-anchored and eased; panning carries inertia and decays with friction.',
@@ -966,7 +1131,7 @@ function RangeChart() {
 
 const ROADMAP = [
   { t: 'Indicator library', d: 'SMA, EMA, VWAP, RSI and MACD as first-class calls on top of series and panes \u2014 plus resizable, reorderable panes and a plugin hook for your own.', next: true },
-  { t: 'Drawing tools', d: 'Trendlines, Fibonacci, position tool — with hit-testing, undo/redo and serialisable state.' },
+  { t: 'More drawing tools', d: 'Brush, callouts, pitchfork, Gann and fib extensions; multi-select; edge auto-pan while a drag runs off the plot; alerts on a drawing\u2019s price (priceAt() is the building block).' },
   { t: 'Chart-type morphing', d: 'Animate candlestick → Heikin-Ashi → line as an eased transition rather than a redraw.' },
   { t: 'Session gaps', d: 'Collapse weekends and closed sessions instead of rendering them as ordinary bar steps.' },
 ]
@@ -985,6 +1150,7 @@ export default function Landing() {
         </a>
         <nav className="lp-navlinks">
           <a href="#features">Features</a>
+          <a href="#drawings">Drawings</a>
           <a href="#panes">Panes</a>
           <a href="#view">Sessions</a>
           <a href="#series">Series</a>
@@ -1001,7 +1167,7 @@ export default function Landing() {
       {/* ---- hero ---- */}
       <section className="lp-hero">
         <span className="lp-pill">
-          <span className="lp-pulse" /> new in v0.9.0 — indicator panes
+          <span className="lp-pulse" /> new in v{CURRENT_RELEASE} — drawing tools
         </span>
         <h1>
           Candlestick charts that
@@ -1010,7 +1176,7 @@ export default function Landing() {
         </h1>
         <p className="lp-sub">
           A canvas charting core for financial frontends. Ticks ease in, axes glide,
-          panning carries momentum — and the whole thing is 15.8&nbsp;KB gzipped with
+          panning carries momentum — and the core is 20.3&nbsp;KB gzipped with
           zero dependencies. Plug in your own data feed and drop it into any stack.
         </p>
 
@@ -1058,6 +1224,81 @@ export default function Landing() {
       {/* Feature sections run NEWEST FIRST, so the version tags descend as you
           scroll and the current release is the first one you meet. Only the
           newest carries an accent tag; see VersionTag. */}
+      {/* ---- drawings ---- */}
+      <section className="lp-section" id="drawings">
+        <VersionTag v="0.12.0" />
+        <h2>Draw, and it stays drawn</h2>
+        <p className="lp-lede">
+          Trendlines, Fibonacci, channels, ranges and positions, pinned to time
+          and price rather than to pixels. Reload the data, prepend history,
+          change the timeframe: the line is where you left it. Snapped where you
+          mean, undoable, and absent from your bundle until you import it.
+        </p>
+
+        <div className="lp-annogrid">
+          <DrawingsChart />
+
+          <div className="lp-code lp-annocode">
+            <div className="lp-codehead">Enabling drawings</div>
+            <pre>{`import { createChart } from 'emberwick'
+import { enableDrawings } from 'emberwick/drawings'
+
+const chart = createChart(el)
+const drawings = enableDrawings(chart)
+
+// once per commit: never per drag frame,
+// never for a load
+drawings.subscribe('change', debounce(() =>
+  save(drawings.getDrawings()), 400))
+
+// a load, not an edit: no change event,
+// no undo entry, and a report of what it kept
+const report = drawings.setDrawings(await load())
+
+drawings.setTool('fibRetracement')`}</pre>
+          </div>
+        </div>
+
+        <div className="lp-annofacts lp-annofacts-4">
+          <div className="lp-annofact">
+            <h3>Pinned to time and price, not pixels</h3>
+            <p>
+              An anchor is <code>{'{ time, price }'}</code>. A point past the
+              newest bar is stored as a bar count from it, so it survives session
+              gaps and appended bars. Zoom, pan, <code>setData</code>, a history
+              prepend and replay all leave it where it was.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Snaps where you mean</h3>
+            <p>
+              To a candle&rsquo;s open, high, low and close with the crosshair&rsquo;s
+              own magnet and reach, to other drawings&rsquo; anchors, to fib levels
+              and price lines. <code>Shift</code> holds 45&deg;, <code>Alt</code> frees
+              the point, <code>Ctrl</code>/<code>&#8984;</code> flips the magnet.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Undo you can watch</h3>
+            <p>
+              Undo is per drawing, so it never clobbers an edit to another one,
+              and what it restores glides back instead of jumping. The motion is in
+              data space, so it stays glued to the candles even if you zoom
+              mid-glide, and it honours reduced motion.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Nothing until you import it</h3>
+            <p>
+              <code>emberwick/drawings</code> is its own entry. The core entry is
+              byte-identical with or without it; the generic plugin seam is +4.2&nbsp;KB
+              gzipped in the core ESM. The drawings themselves are 52.3&nbsp;KB
+              gzipped as a minified UMD (70.7&nbsp;KB as unminified ESM), and only
+              when you import them.
+            </p>
+          </div>
+        </div>
+      </section>
       {/* ---- panes ---- */}
       <section className="lp-section" id="panes">
         <VersionTag v="0.9.0" />
