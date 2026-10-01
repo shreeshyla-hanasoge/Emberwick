@@ -229,8 +229,9 @@ export class Chart {
     this._stickyCursor = false
     this._holdTimer = null
     /**
-     * Opt-in plugins (addPlugin), in attach order; input is offered topmost
-     * (last attached) first. Empty on every chart that never enables one, and
+     * Opt-in plugins (addPlugin), in stack order: every `below` plugin first,
+     * then the rest, each group in attach order. Input is offered from the
+     * end, so topmost first. Empty on every chart that never enables one, and
      * each hook below then costs that chart a single length check.
      */
     this._plugins = []
@@ -1250,7 +1251,9 @@ export class Chart {
     // The plugins layer paints above the markers, so what a plugin reports
     // under the pointer occludes marker hover (and, through `claimed`, click).
     // Plugins yield fills to markers themselves (D24) by not reporting them.
-    const hit = p && !this._owner && !this._pluginHit ? this.markerAt(p.x, p.y) : null
+    // A `below` plugin paints UNDER the markers and occludes nothing.
+    const over = this._pluginHit && !this._pluginHit.rec.below
+    const hit = p && !this._owner && !over ? this.markerAt(p.x, p.y) : null
     const id = hit ? hit.id : null
     if (id !== this._hoverMarkerId) {
       this._hoverMarkerId = id
@@ -1264,8 +1267,10 @@ export class Chart {
   /** The single writer of the container cursor, deduped. */
   _applyCursor() {
     const hit = this._pluginHit
+    // A marker hovered over a `below` plugin's hit is on top of it: it wins.
     const css = this._cursorOverride ||
-      (hit && hit.cursor) || (this._hoverMarkerId != null ? 'pointer' : 'crosshair')
+      (hit && !(hit.rec.below && this._hoverMarkerId != null) && hit.cursor) ||
+      (this._hoverMarkerId != null ? 'pointer' : 'crosshair')
     if (css === this._cursorCss) return
     this._cursorCss = css
     this.container.style.cursor = css
@@ -2001,14 +2006,22 @@ export class Chart {
     if (!plugin || typeof plugin !== 'object') throw new Error('Chart: addPlugin() needs a plugin object')
     if (this._destroyed) throw new Error('Chart: addPlugin() on a destroyed chart')
     if (this._plugins.some((r) => r.plugin === plugin)) return this
-    // Created on the first attach only: a chart with no plugin keeps exactly
-    // the three canvases it always had.
-    this.layers.add('plugins', 'overlay')
-    const rec = { plugin, errors: 0, failed: false, host: null }
+    // `layer` is read once, here: a plugin never changes canvas while attached.
+    const below = plugin.layer === 'below'
+    const rec = { plugin, errors: 0, failed: false, host: null, below, layer: below ? 'pluginsBelow' : 'plugins' }
+    // Created on the first attach to that layer only: a chart with no plugin
+    // keeps exactly the three canvases it always had, and one with only
+    // `below` plugins never pays for a `plugins` canvas. `pluginsBelow` sits
+    // directly under the candles, `plugins` directly under the crosshair.
+    this.layers.add(rec.layer, below ? 'main' : 'overlay')
     rec.host = this._makeHost(rec)
-    this._plugins.push(rec)
+    // Below plugins sort first, so walking the array from the end offers
+    // input to every plugin above the candles before any plugin under them.
+    let at = this._plugins.length
+    if (below) for (at = 0; at < this._plugins.length && this._plugins[at].below;) at++
+    this._plugins.splice(at, 0, rec)
     this._call(rec, 'attach', rec.host)
-    this.loop.invalidate('plugins')
+    this.loop.invalidate(rec.layer)
     return this
   }
 
@@ -2021,8 +2034,9 @@ export class Chart {
     this._call(rec, 'detach')
     if (this._pluginHit && this._pluginHit.rec === rec) this._pluginHit = null
     this._cursorOverride = null
-    if (this._plugins.length) this.loop.invalidate('plugins')
-    else this.layers.remove('plugins')
+    // Each canvas goes with the last plugin that painted on it.
+    if (this._plugins.some((r) => r.below === rec.below)) this.loop.invalidate(rec.layer)
+    else this.layers.remove(rec.layer)
     this._applyCursor()
     return this
   }
@@ -2048,7 +2062,7 @@ export class Chart {
       get priceLines() { return chart.priceLines },
       get animate() { return chart.options.animate !== false },
       get exporting() { return chart._pluginInfo.exporting },
-      invalidate() { chart.loop.invalidate('plugins') },
+      invalidate() { chart.loop.invalidate(rec.layer) },
       setCursor(css) { chart._cursorOverride = css || null; chart._applyCursor() },
       setHover(css) {
         chart._pluginHit = css ? { rec, cursor: css } : (chart._pluginHit && chart._pluginHit.rec === rec ? null : chart._pluginHit)
@@ -2148,20 +2162,22 @@ export class Chart {
     const info = this._pluginInfo
     info.full = full
     info.dt = dt
+    // Keep-alive is per layer: a hover fade above the candles must not
+    // repaint whatever sits under them, and the reverse.
+    const paint = { plugins: full || dirty.has('plugins'), pluginsBelow: full || dirty.has('pluginsBelow') }
     let busy = false
     for (const rec of this._plugins) {
       rec.failed = false
       if (rec.plugin.tick) {
-        try { if (rec.plugin.tick(dt, info) === true) busy = true } catch (err) { rec.failed = true; this._emitError(err, 'plugin tick') }
+        try { if (rec.plugin.tick(dt, info) === true) busy = paint[rec.layer] = true } catch (err) { rec.failed = true; this._emitError(err, 'plugin tick') }
       }
     }
-    const paint = full || busy || dirty.has('plugins')
-    if (paint) this._paintPlugins(this.layers.ctx.plugins, info, true)
+    for (const layer in paint) if (paint[layer]) this._paintPlugins(this.layers.ctx[layer], info, true, layer)
     for (let i = this._plugins.length - 1; i >= 0; i--) {
       const rec = this._plugins[i]
       if (!rec) continue
       if (rec.failed) rec.errors++
-      else if (paint || !rec.plugin.draw) rec.errors = 0
+      else if (paint[rec.layer] || !rec.plugin.draw) rec.errors = 0
       if (rec.errors >= 10) {
         this.removePlugin(rec.plugin)
         this._emitError(new Error('plugin removed after 10 consecutive failing frames'), 'plugin')
@@ -2170,11 +2186,11 @@ export class Chart {
     return busy
   }
 
-  _paintPlugins(ctx, info, clear) {
+  _paintPlugins(ctx, info, clear, layer) {
     if (!ctx) return
     if (clear) ctx.clearRect(0, 0, this.layers.width, this.layers.height)
     for (const rec of this._plugins) {
-      if (!rec.plugin.draw) continue
+      if (rec.layer !== layer || !rec.plugin.draw) continue
       ctx.save()
       try { rec.plugin.draw(ctx, info) } catch (err) { rec.failed = true; this._emitError(err, 'plugin draw') }
       ctx.restore()
@@ -2192,18 +2208,22 @@ export class Chart {
     if (!this._inFrame) {
       try { this._frame(new Set(['all']), 0) } catch (err) { this._emitError(err, 'toImage') }
     }
-    // A clean pass, painted into the COMPOSITE between main and overlay:
-    // committed drawings only — no handles, hover, drafts or half-played
-    // animations. The export pass never paints the live plugins canvas, so
-    // the on-screen chrome needs no restoring.
+    // A clean pass, painted into the COMPOSITE where each live layer sits:
+    // `below` plugins after base, the rest between main and overlay.
+    // Committed drawings only — no handles, hover, drafts or half-played
+    // animations. The export pass never paints a live plugin canvas, so the
+    // on-screen chrome needs no restoring.
     const info = this._pluginInfo
     const dpr = this.layers.dpr
-    const out = this.layers.composite(this.layers.names.filter((n) => n !== 'plugins'), (c, name) => {
-      if (name !== 'main') return
+    const out = this.layers.composite(this.layers.names.filter((n) => !/^plugins/.test(n)), (c, name) => {
+      const layer = name === 'main' ? 'plugins' : name === 'base' ? 'pluginsBelow' : ''
+      // A live canvas exists exactly while a plugin paints on it: no canvas,
+      // no pass, and the composite is untouched at that depth.
+      if (!this.layers.ctx[layer]) return
       c.save()
       c.setTransform(dpr, 0, 0, dpr, 0, 0)
       info.exporting = true
-      try { this._paintPlugins(c, info, false) } finally { info.exporting = false; c.restore() }
+      try { this._paintPlugins(c, info, false, layer) } finally { info.exporting = false; c.restore() }
     })
     return out.toDataURL('image/png')
   }

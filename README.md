@@ -1311,13 +1311,26 @@ chart.addPlugin(plugin)             // idempotent per object
 chart.removePlugin(plugin)
 ```
 
+A plugin paints **above** the candles unless it says otherwise. Set
+`layer: 'below'` on the plugin object to paint **under** them instead, which is
+where context behind price belongs (a volume profile, a session shade): drawn
+over the candles it would hide the price action. `layer` is read once, by
+`addPlugin`.
+
+```js
+chart.addPlugin({
+  layer: 'below',                   // 'above' is the default
+  draw(ctx) { /* painted under the candles, over the grid */ },
+})
+```
+
 Every hook is optional, and `this` is the plugin:
 
 | Hook | Called | Notes |
 |---|---|---|
 | `attach(host)` / `detach()` | On add / remove (and chart `destroy()`) | |
 | `tick(dt, info)` | Every frame while attached | Advance your own state. `info.full` means the view moved or everything was invalidated: re-derive held points there. Return `true` to keep the loop awake **without** repainting the candles |
-| `draw(ctx, info)` | When the plugins layer repaints | The context is cleared, pixel-ratio scaled and `save`/`restore`-wrapped. `info.exporting` is true during `toImage()` |
+| `draw(ctx, info)` | When this plugin's layer repaints | The context is cleared, pixel-ratio scaled and `save`/`restore`-wrapped. `info.exporting` is true during `toImage()` |
 | `afterFrame()` | After the chart's own state events | The safe place to emit to your listeners |
 | `hover(e, reason)` | A mouse or pen moved | Return `{ cursor, crosshair }`. `e === null` says why: the pointer left, a pan press began, or a plugin above reported a hit |
 | `pointerDown(e)` | A press | Return `true` to own it until up, cancel or `host.release()` |
@@ -1327,7 +1340,9 @@ Every hook is optional, and `this` is the plugin:
 | `doubleClick(e)` / `contextMenu(e)` / `keyDown(e)` | | `true` consumes: no view reset, no browser menu, no pan or zoom key |
 
 Input is offered to plugins first, topmost first, and the first to return
-`true` wins. `PluginPointer` carries the position in chart pixels, the pointer
+`true` wins. Every plugin above the candles is asked before any plugin below
+them, whatever order they were attached in, so a `below` plugin that claims
+nothing blocks nothing. `PluginPointer` carries the position in chart pixels, the pointer
 type, modifiers, the `region` (`'plot' | 'priceAxis' | 'timeAxis'`, the chart's
 own test, so you agree with its gestures) and the pane under it.
 
@@ -1348,10 +1363,22 @@ overlay's `z-index` from 3 to 4 (it matters only if you stack your own
 elements inside the container). It is dropped with the last plugin, so a chart
 without one is exactly what it was.
 
-**Dirty and keep-alive rules.** `host.invalidate()` repaints the plugins layer
-next frame and not the candles. `tick` returning `true` keeps the loop running;
-returning nothing lets an idle chart drop to zero CPU. A plugin that animates
-must say so or it stops.
+The first `layer: 'below'` plugin creates **`pluginsBelow`** instead, between
+`base` and `main`, and the full stack is `base`, `pluginsBelow`, `main`,
+`plugins`, `overlay`. Each canvas exists only while a plugin paints on it, and
+only canvases that exist are numbered: a chart with one `below` plugin has four
+canvases, not five, and a chart with none has the stack, the z-indexes and the
+draw operations it had before the layer existed.
+
+Markers are drawn on `main`, so they sit above a `below` plugin. What such a
+plugin reports from `hover` therefore never hides a marker: the marker's hover
+and its `pointer` cursor win where the two overlap.
+
+**Dirty and keep-alive rules.** `host.invalidate()` repaints the layer that
+plugin lives on next frame, and neither the candles nor the other plugin layer.
+`tick` returning `true` keeps the loop running and repaints that plugin's layer
+only; returning nothing lets an idle chart drop to zero CPU. A plugin that
+animates must say so or it stops.
 
 **Errors are isolated.** A hook that throws is reported through the chart's
 `'error'` event with the phase `plugin <hook>` and reads as "not claimed". A
@@ -1360,12 +1387,14 @@ the same budget the render loop has. A throwing listener of your own `'error'`
 handler is not isolated from inside a frame.
 
 **Exporting.** With a plugin attached, `toImage()` first re-renders every layer
-from the current state, then calls your `draw` on the composite canvas between
-`main` and `overlay` with `info.exporting` set. That re-render runs `tick` and
-`afterFrame` once, so state events can fire from inside `toImage()`.
+from the current state, then calls your `draw` on the composite canvas with
+`info.exporting` set, at the depth your layer has on screen: the image is
+`base`, the `below` plugins, `main`, the other plugins, then `overlay`. That
+re-render runs `tick` and `afterFrame` once, so state events can fire from
+inside `toImage()`.
 
 **Reserved and not built:** a `beforeFrame(dt)` hook (edge auto-pan would need
-it), a `below` layer placement, and an autoscale `extent()` hook.
+it) and an autoscale `extent()` hook.
 
 ---
 
