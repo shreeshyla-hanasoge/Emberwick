@@ -417,6 +417,12 @@ export declare class RandomFeed extends DataFeed {
 
 export declare class TimeScale {
   constructor(opts?: TimeScaleOptions)
+  /** Current pixels per bar. Eases during a zoom. */
+  readonly spacing: number
+  /** Width of the plot in CSS px: x runs from 0 to this. */
+  readonly width: number
+  /** Bar duration in ms, inferred from the data (the median gap) or taken from the feed. */
+  readonly timeframeMs: number
   visibleRange(): { from: number; to: number }
   barWidth(): number
   x(index: number): number
@@ -435,6 +441,8 @@ export declare class TimeScale {
 
 export declare class PriceScale {
   constructor(opts?: PriceScaleOptions)
+  /** 'linear' or 'log'. Change it with setMode(), or chart.setPriceMode() for the price pane. */
+  readonly mode: PriceMode
   y(price: number): number
   price(y: number): number
   setMode(mode: PriceMode): void
@@ -972,6 +980,14 @@ export declare function toNumber(v: unknown): number
 export declare function timeToIndex(bars: readonly Bar[], time: number, timeframeMs?: number): number
 /** The inverse of timeToIndex; null with no bars or a non-finite index. */
 export declare function indexToTime(bars: readonly Bar[], index: number, timeframeMs?: number): number | null
+
+/**
+ * True when `color` is a light background: relative luminance above 0.5.
+ * Reads #rgb, #rgba, #rrggbb, #rrggbbaa, rgb() and rgba(); anything else
+ * (a named colour, hsl()) reads as dark. A theme has no dark/light flag, so
+ * this is how a plugin picks colours for `theme.background`.
+ */
+export declare function isLight(color: string): boolean
 
 /** Canvas dash arrays for each LineStyle. */
 export declare const DASH: { readonly solid: number[]; readonly dashed: number[]; readonly dotted: number[] }

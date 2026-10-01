@@ -1766,6 +1766,7 @@ import {
   mulberry32,                   // seeded PRNG
   toNumber, DASH,               // the coercion and dash arrays inputs share
   timeToIndex, indexToTime,     // time <-> fractional bar index
+  isLight,                      // is this theme background light?
   version,
 } from 'emberwick'
 
@@ -1788,6 +1789,12 @@ timeframeMs)` map a time in ms to a **fractional** bar index and back: exact on
 a bar, linear across a gap, extrapolated past either end, and never clamped or
 snapped the way a marker is. `emberwick/drawings` re-exports the same two
 functions, as it always has.
+
+`isLight(color)` is true when a colour's relative luminance is above 0.5. A
+theme has no dark or light flag, so this is how a plugin that derives its own
+colours picks a set that reads on `theme.background`. It parses `#rgb`,
+`#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()` and `rgba()`; anything else reads as
+dark.
 
 ---
 
