@@ -29,21 +29,35 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  * 0.11.0 against the +2.6 KB the spec allowed, because the ESM is unminified
  * and keeps the house-style "why" comments the seam's gesture handling needs.
  * The minified core UMD, where comments cost nothing, stays inside its 21 KB.
+ *
+ * 0.13 moved both core budgets up by one, to 38 and 22: the four plugin
+ * additions (the `below` layer, timeToIndex/indexToTime, host.drawPriceTag
+ * and isLight) measured 37.3 KB and 21.2 KB. What bounds them is not these
+ * ceilings but MAX_CORE_GROWTH below.
  */
 const BUDGETS = [
-  ['dist-lib/umd/emberwick.umd.js', 21],
-  ['dist-lib/index.js', 37], // unminified ESM; consumers minify
+  ['dist-lib/umd/emberwick.umd.js', 22],
+  ['dist-lib/index.js', 38], // unminified ESM; consumers minify
   ['dist-lib/umd/emberwick-drawings.umd.js', 63],
   ['dist-lib/drawings.js', 85], // unminified ESM
 ]
 
 /**
- * Gzipped bytes of the 0.11.0 release, before the plugin seam existed. The
- * printed delta is what "the core costs N KB more than it used to" means in
- * the CHANGELOG, so it is measured here, the same way every time, rather than
- * worked out by hand.
+ * Gzipped bytes of the previous release's core. The printed delta is what
+ * "the core costs N KB more than it used to" means in the CHANGELOG, so it is
+ * measured here, the same way every time, rather than worked out by hand.
+ * (0.11.0, before the plugin seam: 32578 and 18130.)
  */
-const BASELINE_0_11 = { 'dist-lib/index.js': 32578, 'dist-lib/umd/emberwick.umd.js': 18130 }
+const BASELINE = { label: '0.12.0', 'dist-lib/index.js': 36877, 'dist-lib/umd/emberwick.umd.js': 20816 }
+
+/**
+ * How far the core may grow past BASELINE, in gzipped bytes: +1.5 KB, the
+ * allowance 0.13 gave the four additions that volume profiles needed from
+ * it. A hard failure rather than a note, because "a chart that does not use
+ * profiles pays almost nothing for them" is only true while this holds, and
+ * a KB-rounded budget would let half of it slip by unseen.
+ */
+const MAX_CORE_GROWTH = 1536
 
 let failed = false
 
@@ -59,13 +73,17 @@ for (const [rel, maxKb] of BUDGETS) {
   const raw = await readFile(file)
   const bytes = gzipSync(raw).length
   const kb = bytes / 1024
-  const ok = kb <= maxKb
+  const base = BASELINE[rel]
+  const grew = base === undefined ? 0 : bytes - base
+  const ok = kb <= maxKb && grew <= MAX_CORE_GROWTH
   if (!ok) failed = true
-  const base = BASELINE_0_11[rel]
-  const delta = base === undefined ? '' : `, ${fmtDelta(bytes - base)} vs 0.11.0`
+  const delta = base === undefined ? '' : `, ${fmtDelta(grew)} vs ${BASELINE.label}`
   console.log(
     `${ok ? 'ok  ' : 'FAIL'} ${rel}: ${kb.toFixed(1)} KB gzipped (budget ${maxKb} KB${delta})`
   )
+  if (grew > MAX_CORE_GROWTH) {
+    console.log(`     the core may grow by at most ${fmtDelta(MAX_CORE_GROWTH)} over ${BASELINE.label}`)
+  }
 }
 
 if (failed) {

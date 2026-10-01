@@ -22,6 +22,8 @@ export { Replay, MIN_SPEED, MAX_SPEED } from './replay/Replay.js'
 export { toNumber } from './core/formatters.js'
 /** So 'dashed' means one thing across price lines, series and drawings. */
 export { DASH } from './render/style.js'
+/** Whether a theme background is light: how a plugin picks colours that read on it. */
+export { isLight } from './core/color.js'
 /** Time <-> fractional bar index: how anything stored against time finds its x. */
 export { timeToIndex, indexToTime } from './core/time.js'
 

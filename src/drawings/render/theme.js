@@ -13,10 +13,20 @@
  * (the default line and the accent) are picked per light/dark background.
  */
 
+import { isLight } from '../../chart/index.js'
+
+// isLight moved into the core in 0.13, so every plugin asks the question the
+// same way. It is re-exported because this module has always exported it.
+export { isLight }
+
 /**
  * Parse #rgb, #rgba, #rrggbb, #rrggbbaa, rgb() and rgba() into [r, g, b]
  * (0..255), or null. Deliberately small: named colours, hsl() and
  * color-mix() read as unknown, and unknown reads as dark (the house theme).
+ *
+ * A private copy of the parser inside the core's isLight, which the core
+ * entry does not export: the paint helpers and their tests still parse
+ * colours here.
  */
 export function parseColor(color) {
   if (typeof color !== 'string') return null
@@ -40,23 +50,6 @@ export function parseColor(color) {
     out[i] = Math.max(0, Math.min(255, out[i]))
   }
   return out
-}
-
-/** sRGB channel (0..255) to linear light, per WCAG's relative luminance. */
-const lin = (c) => {
-  const v = c / 255
-  return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
-}
-
-/**
- * True when `color` is a light background: relative luminance > 0.5.
- * Unknown formats read as dark, because the default theme is dark and a
- * wrong guess there costs least (amber and blue both read on mid-greys).
- */
-export function isLight(color) {
-  const rgb = parseColor(color)
-  if (!rgb) return false
-  return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]) > 0.5
 }
 
 export function drawingTheme(t, overrides) {
