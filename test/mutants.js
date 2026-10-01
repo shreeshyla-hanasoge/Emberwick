@@ -291,8 +291,10 @@ const CORE_MUTANTS = [
   {
     name: 'The price-line axis label uses the raw price again',
     file: 'src/chart/render/annotations.js',
-    find: '      const label = price.toFixed(dec)',
-    replace: '      const label = L.price.toFixed(dec)',
+    // Re-anchored in 0.13: the tag moved into drawPriceTag(), so the label is
+    // now formatted in the call rather than in a local.
+    find: '      drawPriceTag(ctx, plot, y, price.toFixed(dec), color,',
+    replace: '      drawPriceTag(ctx, plot, y, L.price.toFixed(dec), color,',
   },
   {
     name: 'The price axis is drawn before the scale is primed',
