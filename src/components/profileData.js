@@ -127,3 +127,31 @@ export function buildProfiles(bars, { sessionOf, step, source, developing = fals
  * axis is: a session that began at :30 in a half-hour zone would look wrong.
  */
 export const hourOf = (time) => Math.floor((time - new Date(time).getTimezoneOffset() * MIN) / (60 * MIN))
+
+/**
+ * Coarsen fine bars into `tf`-wide candles, each session's first candle
+ * starting at the session's first bar. This is the other half of what a host
+ * does: it keeps the fine bars for the profile and draws the coarse ones.
+ *
+ * @param {Array} bars one session's fine bars, ascending
+ * @param {number} tf candle width in ms
+ */
+export function aggregate(bars, tf) {
+  const out = []
+  if (!bars.length) return out
+  const t0 = bars[0].time
+  let cur = null
+  for (const b of bars) {
+    const slot = t0 + Math.floor((b.time - t0) / tf) * tf
+    if (!cur || cur.time !== slot) {
+      cur = { time: slot, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume || 0 }
+      out.push(cur)
+    } else {
+      if (b.high > cur.high) cur.high = b.high
+      if (b.low < cur.low) cur.low = b.low
+      cur.close = b.close
+      cur.volume += b.volume || 0
+    }
+  }
+  return out
+}

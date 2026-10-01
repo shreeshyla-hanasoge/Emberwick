@@ -68,3 +68,41 @@ test('buildProfiles makes ProfileData the library accepts as it is', () => {
   assert.equal(buildProfiles(bars, { sessionOf: () => 0, step: 0.5 }).step, 0.5, 'a given step is kept')
   assert.equal('source' in buildProfiles(bars, { sessionOf: () => 0 }), false)
 })
+
+// ------------------------------------------------------------ the demo tape
+
+const { aggregate } = await import('../src/components/profileData.js')
+const { createTape, sessionOf, sessionOpen, SESSION_MINUTES } = await import('../src/components/profileTape.js')
+
+test('aggregate coarsens fine bars into candles that start on the session open and keep the volume', () => {
+  const fine = Array.from({ length: 12 }, (_, i) => ({ time: 1000 + i * MIN, open: 10 + i, high: 11 + i, low: 9 + i, close: 10.5 + i, volume: 100 }))
+  const c = aggregate(fine, 5 * MIN)
+  assert.deepEqual(c.map((b) => b.time), [1000, 1000 + 5 * MIN, 1000 + 10 * MIN], 'aligned to the first bar, not to the clock')
+  assert.deepEqual(c[0], { time: 1000, open: 10, high: 15, low: 9, close: 14.5, volume: 500 })
+  assert.deepEqual([c[2].open, c[2].close, c[2].volume], [20, 21.5, 200], 'a short last candle is still a candle')
+  assert.deepEqual(aggregate([], 5 * MIN), [])
+})
+
+test('the demo tape is deterministic, session-shaped, and bins into profiles the library reads', () => {
+  const run = () => { const t = createTape({ seed: 7 }); return Array.from({ length: SESSION_MINUTES * 2 + 30 }, () => t.next()) }
+  const mins = run()
+  assert.deepEqual(mins, run(), 'the same seed is the same tape')
+  for (let i = 1; i < mins.length; i++) assert.ok(mins[i].time > mins[i - 1].time, 'ascending')
+  for (const b of mins) assert.ok(b.high >= Math.max(b.open, b.close) && b.low <= Math.min(b.open, b.close) && b.volume > 0)
+  assert.equal(mins[0].time, sessionOpen(0))
+  assert.equal(mins[SESSION_MINUTES].time, sessionOpen(1), 'the minute after the close is the next session\'s open')
+  assert.equal(sessionOf(mins[5].time), sessionOpen(0))
+  assert.equal(sessionOf(mins[SESSION_MINUTES + 5].time), sessionOpen(1))
+
+  // Heavy at the open and into the close, quiet in the middle: what makes the profile believable.
+  const vol = (a, b) => mins.slice(a, b).reduce((s, x) => s + x.volume, 0) / (b - a)
+  assert.ok(vol(0, 20) > 1.5 * vol(180, 220), 'the open is busier than midday')
+  assert.ok(vol(SESSION_MINUTES - 20, SESSION_MINUTES) > 1.3 * vol(180, 220), 'and so is the close')
+
+  const data = buildProfiles(mins, { sessionOf, source: 'tape', developing: true })
+  const read = normalizeData(data)
+  assert.equal(read.sessions.length, 3)
+  assert.deepEqual(read.sessions.map((s) => s.developing), [false, false, true])
+  for (const s of read.sessions) assert.ok(s.n >= 8 && s.poc > s.val && s.poc < s.vah, `a session of ${s.n} bins with its POC inside its value area`)
+  assert.equal(splitSessions(mins, sessionOf).flatMap((g) => aggregate(g, 5 * MIN)).length, 78 * 2 + 6, '78 five-minute candles a session')
+})
