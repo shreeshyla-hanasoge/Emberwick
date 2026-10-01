@@ -618,9 +618,10 @@ export declare class Chart {
 
   /**
    * PNG data URL of all layers composited. With a plugin attached, every
-   * layer is re-rendered from the current state first, and the plugin's
-   * export pass (`info.exporting`) is painted between the candles and the
-   * crosshair.
+   * layer is re-rendered from the current state first, and each plugin's
+   * export pass (`info.exporting`) is painted where its layer sits: under the
+   * candles for a `below` plugin, between the candles and the crosshair
+   * otherwise.
    */
   toImage(): string
   /** Rolling frames-per-second of the render loop. */
@@ -700,13 +701,14 @@ export declare class Chart {
   /**
    * Attach an opt-in plugin. Idempotent per object. Throws on a non-object
    * or a destroyed chart. The first attach creates the `plugins` canvas,
-   * between the candles and the crosshair.
+   * between the candles and the crosshair; the first with `layer: 'below'`
+   * creates `pluginsBelow`, between the grid and the candles.
    * @experimental The plugin API may change before 1.0.
    */
   addPlugin(plugin: ChartPlugin): this
   /**
    * Cancel the plugin's gesture if it owns one, call its detach(), and drop
-   * the `plugins` canvas with the last plugin.
+   * its canvas with the last plugin on that layer.
    * @experimental The plugin API may change before 1.0.
    */
   removePlugin(plugin: ChartPlugin): this
@@ -827,11 +829,11 @@ export interface PluginHost {
   /** options.animate !== false; setAnimate() updates it. */
   readonly animate: boolean
   readonly exporting: boolean
-  /** Repaint the plugins layer next frame — not the candles. */
+  /** Repaint the layer this plugin lives on next frame — not the candles, and not the other plugin layer. */
   invalidate(): void
   /** A gesture cursor ('grabbing') that wins over everything while non-null. */
   setCursor(css: string | null): void
-  /** What THIS plugin has under the hover point; occludes marker hover. */
+  /** What THIS plugin has under the hover point; occludes marker hover, unless the plugin is `below` (markers paint above it). */
   setHover(css: string | null): void
   /**
    * Move the crosshair. From tick() it lands in the same frame's overlay, and
@@ -864,6 +866,15 @@ export interface PluginHost {
  * @experimental The plugin API may change before 1.0.
  */
 export interface ChartPlugin {
+  /**
+   * Which canvas this plugin paints on. 'above' (the default) is `plugins`,
+   * between the candles and the crosshair. 'below' is `pluginsBelow`, between
+   * the grid and the candles: context behind price, such as a volume profile.
+   * Read once, by addPlugin. Input reaches every 'above' plugin before any
+   * 'below' one.
+   * @experimental
+   */
+  layer?: 'above' | 'below'
   attach?(host: PluginHost): void
   detach?(): void
   /**
@@ -871,13 +882,14 @@ export interface ChartPlugin {
    * to keep the loop awake WITHOUT repainting the candles.
    */
   tick?(dt: number, info: PluginFrameInfo): boolean | void
-  /** Paint. The context is cleared, DPR-scaled and save/restore-wrapped. */
+  /** Paint, on this plugin's layer. The context is cleared, DPR-scaled and save/restore-wrapped. */
   draw?(ctx: CanvasRenderingContext2D, info: PluginFrameInfo): void
   /** After the chart's own state events: the safe place to emit to listeners. */
   afterFrame?(): void
   /**
    * Mouse and pen hover. e === null carries why: the pointer left, an
    * unclaimed pan press began, or a plugin above reported a hit. May repeat.
+   * A 'below' plugin's cursor yields to a marker hovered over it.
    */
   hover?(e: PluginPointer | null, reason?: HoverNoneReason):
     { cursor?: string | null; crosshair?: ExactPoint | null } | null | void

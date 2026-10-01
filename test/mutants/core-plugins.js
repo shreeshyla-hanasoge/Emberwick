@@ -224,7 +224,7 @@ export const MUTANTS = [
   {
     name: "A marker under a drawing still hovers",
     file: 'src/chart/core/Chart.js',
-    find: "    const hit = p && !this._owner && !this._pluginHit ? this.markerAt(p.x, p.y) : null",
+    find: "    const hit = p && !this._owner && !over ? this.markerAt(p.x, p.y) : null",
     replace: "    const hit = p ? this.markerAt(p.x, p.y) : null",
   },
   {
@@ -254,8 +254,8 @@ export const MUTANTS = [
   {
     name: "A throwing plugin can stop the chart",
     file: 'src/chart/core/Chart.js',
-    find: "try { if (rec.plugin.tick(dt, info) === true) busy = true } catch (err) { rec.failed = true; this._emitError(err, 'plugin tick') }",
-    replace: "if (rec.plugin.tick(dt, info) === true) busy = true",
+    find: "try { if (rec.plugin.tick(dt, info) === true) busy = paint[rec.layer] = true } catch (err) { rec.failed = true; this._emitError(err, 'plugin tick') }",
+    replace: "if (rec.plugin.tick(dt, info) === true) busy = paint[rec.layer] = true",
   },
   {
     name: "A failing plugin is never removed",
@@ -266,7 +266,7 @@ export const MUTANTS = [
   {
     name: "A frame that paints nothing resets a failing draw's count",
     file: 'src/chart/core/Chart.js',
-    find: "      else if (paint || !rec.plugin.draw) rec.errors = 0",
+    find: "      else if (paint[rec.layer] || !rec.plugin.draw) rec.errors = 0",
     replace: "      else rec.errors = 0",
   },
   {
@@ -308,7 +308,7 @@ export const MUTANTS = [
   {
     name: "The plugins layer outlives its last plugin",
     file: 'src/chart/core/Chart.js',
-    find: "    else this.layers.remove('plugins')",
+    find: "    else this.layers.remove(rec.layer)",
     replace: "",
   },
   // ------------------------------------------------------ exact crosshair --

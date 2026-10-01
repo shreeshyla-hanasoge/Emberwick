@@ -202,6 +202,28 @@ export function settle(chart, max = 600, dt = 16) {
 }
 
 /**
+ * Run `fn` with a clock that advances a fixed 8 ms per reading.
+ *
+ * The chart samples performance.now() while a pointer drags, and the pan's
+ * inertia is that distance over that time. A test that performs the same
+ * gesture twice and compares what was painted is therefore comparing two
+ * throws at two speeds: identical on a fast machine, where both gaps round to
+ * nothing, and different on a loaded CI runner. Under this clock the same
+ * gesture is the same gesture.
+ */
+export function withFixedClock(fn) {
+  const real = Object.getOwnPropertyDescriptor(globalThis, 'performance')
+  let t = 0
+  Object.defineProperty(globalThis, 'performance', { value: { now: () => (t += 8) }, configurable: true, writable: true })
+  try {
+    return fn()
+  } finally {
+    if (real) Object.defineProperty(globalThis, 'performance', real)
+    else delete globalThis.performance
+  }
+}
+
+/**
  * Change the device pixel ratio and notify anything watching for it, the way
  * dragging a window to a different-DPI monitor does.
  */
