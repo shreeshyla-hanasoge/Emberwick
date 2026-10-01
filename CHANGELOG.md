@@ -3,6 +3,129 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] — 2026-10-02
+
+**See where the volume traded.** Session and visible-range volume profiles,
+with the point of control and the value area, drawn under the candles from data
+you supply, and absent from your bundle until you import them.
+
+### Added
+
+- **Volume profiles (#25)**, in a new entry, `emberwick/profiles`.
+
+  ```js
+  import { createChart } from 'emberwick'
+  import { createVolumeProfile } from 'emberwick/profiles'
+
+  const profile = createVolumeProfile(createChart(el), { data, mode: 'both' })
+  profile.upsertSession(developing)            // live: the forming session
+  profile.on('hover', (bin) => readout(bin))
+  ```
+
+  Decisions worth recording, each of which cost an alternative:
+
+  - **Data in, pixels out.** Emberwick draws profiles the host supplies and
+    never computes one from the chart's bars. Those are often 5-minute bars or
+    longer, and for some instruments they carry no real volume, so a profile
+    binned from them would look plausible and be wrong, with nothing in the
+    library able to tell. The host computes from finer data and passes
+    `ProfileData` (version 1): one bin `step`, and per session `start`, `end`,
+    `lo` and `bins`, with `poc`, `vah`, `val` and `total` optional. Times are
+    ms, on the bars' clock, and need not fall on a chart bar.
+  - **Under the candles.** A profile is context behind price; over the candles
+    it hides the price action. It is a plugin on the new `below` layer and is
+    clipped to the price pane above the volume strip, so it never reaches an
+    oscillator pane, the axes or the strip. The strip is only clipped away
+    while a visible bar carries volume: an instrument with none keeps the
+    whole pane.
+  - **Fixed bins, no shimmer.** Every bin edge is a price from the data, sent
+    through the price scale on each frame. Binning in pixel rows would re-bin
+    as the axis eases, which is on almost every frame of a live chart. Edges
+    are rounded to the pixel grid so translucent neighbours neither overlap nor
+    gap, and bins shorter than a pixel are merged into one rect per row, as
+    long as the longest of them, so a zoomed-out profile keeps its outline.
+  - **Three modes.** `'session'` draws one profile per session, each scaled
+    within itself. `'visible'` draws one for the view: the bin-by-bin sum of
+    the sessions on screen, re-summed only when that set or the data changes.
+    `'both'` draws the first and then the second on top. The visible profile
+    sums **whole sessions**, because the contract carries a total per bin and
+    not a bin per bar; that is a limit, and it is documented as one.
+  - **Replay-safe by default.** A whole-session profile shows how a day traded
+    before it has been played, so with `hideFutureInReplay` a session stays
+    hidden until the last revealed bar has closed past its `end`. "Closed past"
+    and not "is after": a session computed from 1-minute data ends at the open
+    of its last minute, inside the chart's last 5-minute bar, and would
+    otherwise wait for the next day's first bar. An extended POC is checked
+    against revealed bars only, for the same reason.
+  - **Live through `upsertSession`.** It replaces the session with the same
+    `start`, re-reads only that session and repaints only the profile's layer.
+    Index ranges are cached and re-resolved when the bar array changes (a
+    history prepend included, which does not bump the bar generation), and
+    never on a replay scrub.
+  - **It never claims a gesture.** There is no `pointerDown`, and `hover`
+    always returns `null`, so pan, zoom, drawings, markers and the crosshair
+    are untouched. The bin under the pointer is reported by a `'hover'` event,
+    once per bin, with `{ session, price, binLow, binHigh, volume, pct,
+    inValueArea }`.
+  - **`computeValueArea` is exported.** The standard algorithm: start at the
+    POC, compare the two bins above with the two below, add the larger pair,
+    stop at 70%. A POC tie goes to the bin nearest the middle and then the
+    lower one; two equal pairs resolve to the upper one. It is pure and imports
+    with no DOM, so a server can check its numbers against what the chart
+    draws.
+  - **Opt-in, with the measured sizes.** No profile code is in the core, and CI
+    proves the core entry is byte-identical with and without the opt-in
+    entries. The profiles are **9.7 KB** gzipped as unminified ESM and
+    **6.2 KB** as the minified UMD (`emberwick-profiles.umd.js`, global
+    `EmberwickProfiles`, loaded after the core, and refusing a core older than
+    0.13).
+
+  Colours derive from the theme (a neutral picked against `background`, a warm
+  orange POC, `text` for the value-area lines), with four optional theme keys
+  (`profileFill`, `profileValueArea`, `profilePoc`, `profileVaLine`) and a
+  `colors` option over them. The demo site's Playground has a panel with every
+  option on it, and the landing page a live section.
+
+- **A `below` plugin layer** (experimental). `ChartPlugin.layer` is `'above'`
+  (the default, and what every plugin was) or `'below'`, read once by
+  `addPlugin`. The first `below` plugin creates a `pluginsBelow` canvas between
+  `base` and `main`, dropped with the last. Each plugin canvas now exists only
+  while a plugin paints on it; `host.invalidate()` and a `tick` keep-alive
+  repaint only the layer that plugin lives on; input reaches every plugin
+  above the candles before any below them; `toImage()` composites `base`, the
+  below pass, `main`, the above pass, `overlay`. Markers are drawn above a
+  below plugin, so its hover hit never occludes them. The README had listed
+  this placement as reserved and not built.
+
+- **`timeToIndex` and `indexToTime` are exported from the core**, and the
+  plugin host gains `host.timeToIndex(time)` and `host.indexToTime(index)`,
+  resolved against the whole replay dataset at the chart's timeframe. They
+  lived in `emberwick/drawings`, which still exports the same two functions.
+
+- **`host.drawPriceTag(ctx, price, opts?)`**: the price-axis gutter tag a core
+  price line draws, from the same code, for a plugin that marks a level.
+  `setPriceLines` could not serve: it replaces every line the host set.
+
+- **`isLight(color)` is exported from the core**, so a plugin picks colours for
+  a theme the way the drawings do. Typings gain `TimeScale.spacing`,
+  `TimeScale.width`, `TimeScale.timeframeMs` and `PriceScale.mode`, which
+  already existed, and `host.volumeRatio`.
+
+### Changed
+
+- **The core grew by +1.28 KB** gzipped in the unminified ESM (36.0 to
+  37.3 KB) and **+0.86 KB** in the minified UMD (20.3 to 21.2 KB) for the four
+  additions above. `npm run size` now compares against the previous release and
+  fails if the core grows more than 1.5 KB over it. With no `below` plugin
+  attached a chart has the canvases, the z-indexes and the draw operations it
+  had in 0.12.0: a scripted session (pan, zoom, live tick, replay, theme
+  change, export) records identical canvas operations on both versions.
+- **`emberwick/drawings` shrank by about 0.6 KB** (71.3 KB ESM, 52.4 KB UMD):
+  the code that moved into the core is no longer carried twice.
+- **A plugin canvas is created per layer.** A chart with only `below` plugins
+  has no `plugins` canvas. Nothing changes for a chart whose plugins are all
+  above the candles.
+
 ## [0.12.0] — 2026-09-30
 
 **Draw on the chart.** Trendlines, levels, Fibonacci, channels, ranges and

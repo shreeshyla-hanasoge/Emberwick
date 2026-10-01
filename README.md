@@ -18,6 +18,10 @@ point it at your own market data.
   to time and price, snapped where you mean and undoable — in a separate entry
   that is absent from your bundle until you import it. See
   [Drawing tools](#drawing-tools).
+- **Profiled.** Session and visible-range volume profiles with the point of
+  control and value area, drawn under the candles from data you supply, in a
+  third entry that is also absent until you import it. See
+  [Volume profiles](#volume-profiles).
 
 ---
 
@@ -55,13 +59,26 @@ Drawing tools are a second file, loaded **after** the first:
 </script>
 ```
 
-The UMD core build exposes the global `Emberwick`, and the drawings build
-`EmberwickDrawings`. The drawings file reads `window.Emberwick` rather than
-carrying a second copy of the core, so loading it first throws a message that
-says to load `emberwick.umd.js` before it; folding it into the core file would
-make every CDN user pay for tools they never enable.
+Volume profiles are a file of their own too, loaded the same way:
 
-Both UMD builds are for `<script>` tags and CDNs only — there is deliberately
+```html
+<script src="https://unpkg.com/emberwick/umd/emberwick.umd.js"></script>
+<script src="https://unpkg.com/emberwick/umd/emberwick-profiles.umd.js"></script>
+<script>
+  const chart = Emberwick.createChart(document.getElementById('chart'))
+  const profile = EmberwickProfiles.createVolumeProfile(chart, { data })
+</script>
+```
+
+The UMD core build exposes the global `Emberwick`, the drawings build
+`EmberwickDrawings` and the profiles build `EmberwickProfiles`. Each opt-in
+file reads `window.Emberwick` rather than carrying a second copy of the core,
+so loading one first throws a message that says to load `emberwick.umd.js`
+before it (the profiles file also refuses a core older than 0.13, which has no
+layer under the candles for it to draw on); folding them into the core file
+would make every CDN user pay for features they never enable.
+
+All three UMD builds are for `<script>` tags and CDNs only — there is deliberately
 no `emberwick/umd` import specifier, because a UMD file loaded as an ES module exports nothing
 and quietly assigns a global instead.
 
@@ -76,17 +93,20 @@ Nothing stops you copying the core in directly:
 ```bash
 cp -r src/chart /path/to/your-project/src/chart
 cp -r src/drawings /path/to/your-project/src/drawings   # only if you want drawing tools
+cp -r src/profiles /path/to/your-project/src/profiles   # only if you want volume profiles
 ```
 
 ```js
 import { createChart, RandomFeed } from './chart/index.js'
 import { enableDrawings } from './drawings/index.js'
+import { createVolumeProfile } from './profiles/index.js'
 ```
 
-Copy them as siblings: `src/drawings/` reaches the core only through
-`../chart/index.js`. Vendor both from one release; a mismatch logs one warning
-at `createDrawings`. The core folder has no framework dependency and never
-imports `src/drawings/`. It has one import that points outside it, though:
+Copy them as siblings: `src/drawings/` and `src/profiles/` each reach the core
+only through `../chart/index.js`, and neither imports the other. Vendor them
+from one release; a mismatch logs one warning at `createDrawings` or
+`createVolumeProfile`. The core folder has no framework dependency and never
+imports either. It has one import that points outside it, though:
 `render/watermark.js` reads the logo paths from `src/brand.js`, so copy that
 file to `src/brand.js` beside the folder (or point the import at your own).
 Earlier versions of this section claimed the folder was fully self-contained;
@@ -101,9 +121,10 @@ as-is.
 | `emberwick` | The core: `createChart`, `Chart`, feeds, themes, motion primitives |
 | `emberwick/react` | `<EmberwickChart />` React component |
 | `emberwick/webcomponent` | Registers `<emberwick-chart>` (side-effecting import) |
-| `emberwick/drawings` | Drawing tools: `enableDrawings`, `createDrawings`, the nine tools, `normalizeDrawings`. 52.8 KB gzipped as the minified UMD, 71.9 KB as unminified ESM, and only when you import it |
+| `emberwick/drawings` | Drawing tools: `enableDrawings`, `createDrawings`, the nine tools, `normalizeDrawings`. 52.4 KB gzipped as the minified UMD, 71.3 KB as unminified ESM, and only when you import it |
+| `emberwick/profiles` | Volume profiles: `createVolumeProfile`, `computeValueArea`. 6.2 KB gzipped as the minified UMD, 9.7 KB as unminified ESM, and only when you import it |
 
-TypeScript declarations ship for all four entries. The UMD build is not an
+TypeScript declarations ship for all five entries. The UMD build is not an
 import specifier — it is a file you point a `<script>` tag or a CDN at.
 
 ---
@@ -1276,17 +1297,265 @@ Stated plainly, with numbers measured by `npm run size` (gzipped):
   `emberwick/drawings` carries none of it, and CI builds the core with and
   without the drawings entry and fails unless `index.js` and its source map
   come out **byte-identical**.
-- **The plugin seam is generic and costs the core +4.2 KB** in the unminified
-  ESM (36.0 KB, from 31.8) and +2.6 KB in the minified UMD (20.3 KB, from 17.7).
-  It is larger than the ~2.6 KB first estimated because the ESM keeps the
-  comments, and the gesture handling is where the comments are. With no plugin
-  attached it costs **nothing at runtime**: three canvases, and one length check
-  per input hook.
-- **The drawings cost 71.9 KB as unminified ESM and 52.8 KB as the minified
+- **The plugin seam is generic and cost the core +4.2 KB** in the unminified
+  ESM (36.0 KB, from 31.8) and +2.6 KB in the minified UMD (20.3 KB, from 17.7)
+  when it arrived in 0.12. It is larger than the ~2.6 KB first estimated because
+  the ESM keeps the comments, and the gesture handling is where the comments
+  are. With no plugin attached it costs **nothing at runtime**: three canvases,
+  and one length check per input hook. 0.13 added a layer under the candles and
+  three small helpers to it for another +1.28 KB (37.3 KB) and +0.86 KB
+  (21.2 KB); see [Volume profiles](#size-and-limits).
+- **The drawings cost 71.3 KB as unminified ESM and 52.4 KB as the minified
   UMD**, only when you import them. That is a large number next to a 20 KB core,
   and it is the honest one: nine tools, a snap pipeline, a state machine, an
   undo history, a motion system and a schema loader are not small. `createDrawings`
   with the tools you name lets a bundler drop the ones you do not.
+
+---
+
+## Volume profiles
+
+A volume profile is a horizontal histogram of how much volume traded at each
+price, usually one per session, drawn against the price axis and marked with
+the **point of control** (POC, the busiest price) and the **value area** (VAH
+to VAL, the band around the POC that holds 70% of the session's volume). They
+are a separate entry, `emberwick/profiles`, so a chart that never imports it
+carries none of the code.
+
+**Emberwick draws the profiles you give it. It never computes one from the
+chart's bars.** The bars on a chart are often 5-minute bars or longer, and for
+some instruments (an index) they carry no real volume at all; a profile binned
+from them would look plausible and be wrong, and the library has no way to
+know. A host computes profiles where the fine data lives, typically on a server
+from 1-minute bars or ticks, and hands Emberwick the result in a small
+versioned contract. Data in, pixels out.
+
+### Enabling
+
+```js
+import { createChart } from 'emberwick'
+import { createVolumeProfile } from 'emberwick/profiles'
+
+const chart = createChart(el)
+const profile = createVolumeProfile(chart, { data, mode: 'both' })
+
+profile.on('hover', (bin) => showReadout(bin))   // null when the pointer is over no bin
+profile.destroy()                                // detach; idempotent
+```
+
+The profile is a plugin on the [`below` layer](#plugins-experimental): it is
+painted **under** the candles, over the grid, and clipped to the price pane
+above the volume strip, so it never covers price action, an oscillator pane or
+the strip's own bars. It claims no gesture. Pan, zoom, drawings, markers and
+the crosshair behave exactly as they do without it, and a marker over a profile
+bin is still hovered and clicked.
+
+### The data contract
+
+```ts
+interface ProfileData {
+  version: 1
+  source?: string            // shown in the caption: "Vol: <source>"
+  step: number               // price width of ONE bin; the same for every session (> 0)
+  sessions: ProfileSession[] // any order; may be empty
+}
+interface ProfileSession {
+  start: number              // ms since epoch: open time of the session's first bar
+  end: number                // ms since epoch: open time of its last bar (inclusive)
+  lo: number                 // price of the LOW edge of bin 0
+  bins: number[]             // volume per bin, lowest price first; zeros allowed
+  poc?: number               // price; computed when absent
+  vah?: number               // value-area high, a bin's HIGH edge; computed with val when either is absent
+  val?: number               // value-area low, a bin's LOW edge
+  total?: number             // sum of bins; computed when absent
+  developing?: boolean       // live: this session is still forming
+}
+```
+
+Bin `i` covers `[lo + i*step, lo + (i+1)*step)`. **Times are milliseconds**, on
+the same clock as `Bar.time`, and need not fall on a chart bar: a session
+computed from 1-minute data may end at the open of its last minute, four
+minutes into the chart's last 5-minute bar, and is drawn there.
+
+- **What throws**, from `createVolumeProfile`, `setData` and `upsertSession`,
+  with the session's index in the message: a `step` of 0 or less, `bins` that
+  is not an array, a `start` after its `end` (or either not a time), and a `lo`
+  that is not a price. A throw leaves the previous data in place. Nothing
+  throws from a frame.
+- **What is repaired.** A bin that is not a positive finite number counts as
+  zero. `bins` is copied, so you may keep mutating your own array.
+- **What is skipped, silently.** A session that does not overlap the loaded
+  bars. On a live chart that has scrolled its history away that is the normal
+  case, and it is drawn again when the bars are loaded.
+- **What is computed.** A missing `poc`, value area or `total`, once, when the
+  data arrives, by [`computeValueArea`](#computevaluearea).
+- `null` and an empty `sessions` draw nothing. A `version` this build does not
+  read draws nothing and warns once.
+
+### Options
+
+```js
+createVolumeProfile(chart, {
+  data,                      // ProfileData, or null
+  mode: 'session',           // 'session' | 'visible' | 'both'
+  width: 0.3,                // the longest bar, as a share: see below
+  side: 'right',             // 'left' | 'right': where the visible profile sits
+  valueArea: true,           // tint value-area bins, draw VAH and VAL
+  poc: true,                 // draw the POC line
+  extendPoc: false,          // carry each POC right until price trades through it
+  tags: true,                // POC/VAH/VAL tags on the price axis
+  label: true,               // the "Vol: <source>" caption
+  hideFutureInReplay: true,  // under replay, hide sessions that have not finished
+  colors: undefined,         // Partial<ProfileColors>; see "Colours"
+})
+```
+
+| Method | Does |
+|---|---|
+| `setData(data)` | Replace every session. `null` draws nothing |
+| `upsertSession(session)` | Add one session, or replace the one with the same `start`. Needs `setData` first: the bin `step` belongs to the data |
+| `setOptions(partial)` | Change any option except `data`. Validated before anything is applied |
+| `on('hover', fn)` / `off('hover', fn)` | The bin under the pointer; see below |
+| `destroy()` | Detach from the chart. Idempotent, and safe after `chart.destroy()` |
+
+Every method but `destroy` returns the controller.
+
+**Modes.**
+
+- `'session'` draws one profile per session. A session spans from half a bar
+  before its first bar to half a bar after its last. Bars grow rightward from
+  its left edge, and the longest is `width` of **that session's** pixel span,
+  so every session is scaled within itself: a quiet session is as legible as a
+  busy one.
+- `'visible'` draws one profile at the `side` of the price pane: the bin-by-bin
+  sum of every session that overlaps the bars on screen. Its longest bar is
+  `width` of the pane's width, and its POC, VAH and VAL run the width of the
+  pane.
+- `'both'` draws the session profiles, then the visible one on top.
+
+The visible profile **sums whole sessions**: a session half on screen
+contributes all of its volume, because the contract carries a total per bin and
+not a bin per bar. It is re-summed only when the set of sessions on screen
+changes, or the data does; a zoom, a pan within the same sessions or a
+price-scale ease only re-projects it.
+
+**Bins are fixed in price.** Each bin edge is a price from your data, sent
+through the price scale on every frame. Nothing is binned in pixel rows, which
+would re-bin and shimmer every time the axis eased. Edges are rounded to the
+pixel grid so neighbouring bins neither overlap nor gap, and bins shorter than
+a pixel are merged into one rect per row, as long as the longest of them, so a
+profile zoomed far out keeps its outline rather than turning to mush.
+
+**`extendPoc`** carries each session's POC to the right, as a thinner line,
+until the first later bar whose range contains it, or to the edge of the pane:
+a "naked" POC. **`tags`** draws the POC, VAH and VAL of the *latest* session
+(the developing one, on a live chart) as price-axis tags, and the visible
+profile's when there is one.
+
+### Live: the developing session
+
+Send the forming session again whenever it changes. `upsertSession` replaces
+by `start`, re-reads only that session and repaints only the profile layer:
+
+```js
+profile.setData({ version: 1, step: 0.05, source: 'futures volume', sessions: history })
+
+everyMinute(() => {
+  profile.upsertSession({
+    start: todayOpen,        // the same start every time: that is the session's identity
+    end: lastMinuteOpen,
+    lo, bins,
+    developing: true,
+  })
+})
+```
+
+A developing session whose `end` runs a minute or two past the chart's newest
+bar is drawn up to that bar.
+
+### Replay
+
+Under [replay](#replay) a whole-session profile would show how a day traded
+before the day has been played. With `hideFutureInReplay` (the default) a
+session stays hidden until the last **revealed** bar has closed past its
+`end`, and appears on the step that finishes it. The visible profile sums only
+the sessions shown, the tags follow the latest finished session, and an
+extended POC ends only at a bar that has been revealed. Seeking never
+re-resolves anything: sessions are resolved against the whole replay dataset.
+Set `hideFutureInReplay: false` to draw every session throughout.
+
+### Hover
+
+```js
+profile.on('hover', (bin) => {
+  // { session, price, binLow, binHigh, volume, pct, inValueArea }, or null
+})
+```
+
+It fires when the bin under the pointer changes, and `null` once when the
+pointer leaves a drawn bar. `session` is **your own** session object, or `null`
+for the visible profile; `pct` is the bin's share of its profile's total
+volume, 0 to 100. The hovered bin is highlighted on screen and left out of
+`toImage()`. Hover is mouse and pen only, and it never changes the cursor or
+the crosshair. When the view or the data moves under a still pointer the bin is
+re-tested, so the readout never goes stale.
+
+### Colours
+
+The colours derive from the chart theme, so `setTheme(lightTheme)` gives a
+legible profile with no further work: a light neutral on a dark background and
+a dark one on a light background, at a low alpha for bins and a stronger one
+for the value area; a warm orange POC; and the theme's `text` colour for VAH
+and VAL. Four optional theme keys override them, and the `colors` option
+overrides the theme:
+
+| `colors` key | Theme key | Colours |
+|---|---|---|
+| `fill` | `profileFill` | Bins outside the value area |
+| `valueArea` | `profileValueArea` | Bins inside it |
+| `poc` | `profilePoc` | The POC line and its tag |
+| `vaLine` | `profileVaLine` | VAH and VAL lines and their tags |
+| `hover` | — | The bin under the pointer |
+
+Use `rgba()` for the two fills: the candles are drawn over them.
+
+### `computeValueArea`
+
+```js
+import { computeValueArea } from 'emberwick/profiles'
+
+computeValueArea([1, 4, 9, 5, 1], 100, 0.5)   // bins, lo, step, share = 0.7
+// { poc: 101.25, vah: 102.5, val: 101 }       null when nothing traded
+```
+
+The function Emberwick uses when your data omits the POC or the value area. It
+is pure and imports with no DOM, so a server can check its own numbers against
+it. The POC is the busiest bin's centre; a tie goes to the bin nearest the
+middle, then the lower one. The value area is the standard one: start at the
+POC, compare the **two** bins above with the two below, add the larger pair,
+and stop at 70% of the total. A pair is added whole, two equal pairs resolve to
+the upper one, and at an edge the area grows the other way.
+
+### Size and limits
+
+Measured by `npm run size`, gzipped: **9.7 KB** as unminified ESM and
+**6.2 KB** as the minified UMD, and only when you import it. The four
+core additions it stands on (the `below` plugin layer, `timeToIndex` and
+`indexToTime`, `host.drawPriceTag` and `isLight`) cost every chart
+**+0.86 KB** in the minified core UMD and +1.28 KB in the
+unminified ESM, and CI fails the build if that passes +1.5 KB.
+
+- **The visible profile sums whole sessions**, as above.
+- **Bins behind the volume strip are clipped.** The strip takes the bottom
+  `volumeRatio` of the price pane, and the lowest prices of an autoscaled view
+  fall behind it. On a chart whose visible bars carry no volume there is no
+  strip and nothing is clipped.
+- **A session wider than the screen shows its lines, not its bins**, when its
+  left edge is off screen: the bars grow from that edge.
+- **Profiles do not influence autoscale**, and a POC outside the visible
+  prices is simply off screen.
+- **Tags are painted under the candles' own tags** (last price, price lines),
+  because the profile is on the layer below them.
 
 ---
 
@@ -1584,7 +1853,9 @@ Available keys: `background`, `grid`, `axisLine`, `text`, `textStrong`, `up`,
 `timeAxisHeight`.
 
 Three optional keys feed the [drawing theme](#styling) and nothing in the core
-reads them: `drawingAccent`, `drawingLine` and `drawingFib` (an array).
+reads them: `drawingAccent`, `drawingLine` and `drawingFib` (an array). Four
+more feed [volume profiles](#colours) the same way: `profileFill`,
+`profileValueArea`, `profilePoc` and `profileVaLine`.
 
 ---
 
@@ -1777,6 +2048,12 @@ import {
   normalizeDrawings,                         // pure, SSR-safe validation
   timeToIndex, indexToTime, SCHEMA_VERSION, version,
 } from 'emberwick/drawings'
+
+import {
+  createVolumeProfile,                       // draw profiles you supply
+  computeValueArea,                          // pure, SSR-safe POC and value area
+  DATA_VERSION, version,
+} from 'emberwick/profiles'
 ```
 
 `toNumber` (numbers and numeric strings pass; `null`, booleans and `''` are
@@ -1840,8 +2117,8 @@ The repo is both the library and its playground. The playground is an ordinary
 Vite app (`npm run dev` / `npm run build`); the library has its own builds.
 
 ```bash
-npm run build:lib    # ESM, multi-entry  -> dist-lib/{index,react,webcomponent,drawings}.js
-npm run build:umd    # minified UMD      -> dist-lib/umd/{emberwick,emberwick-drawings}.umd.js
+npm run build:lib    # ESM, multi-entry  -> dist-lib/{index,react,webcomponent,drawings,profiles}.js
+npm run build:umd    # minified UMD      -> dist-lib/umd/{emberwick,emberwick-drawings,emberwick-profiles}.umd.js
 npm run pack:lib     # manifest + README + .d.ts into dist-lib/
 npm run verify:package  # the assembled directory, checked as a consumer would use it
 npm run size         # gzipped size budget check
@@ -1856,15 +2133,19 @@ Publishing from `dist-lib/` keeps the playground, the build configs and the
 app's private `package.json` out of the artifact. `package.lib.json` is the
 manifest that becomes the published `package.json`.
 
-Two guards keep drawings from leaking into the core, and the build is where
-they run. `verify:package` fails if `dist-lib/` contains a `chunks/` folder,
-which is what Rollup does when the two entries share a deep import: the
-drawings entry may import the core only through its public entry, and must bind
-`version` from it, a value defined there, not a re-export. And CI builds the
-core alone and compares it with the core from the full build: `index.js` and
-its source map must be **byte-identical**. `npm test` carries the source-level
-half of the same rules (`package-boundaries`: import boundaries, no
-module-scope DOM access, nothing newer than ES2019 in `src/drawings`).
+Two guards keep the opt-in entries (drawings, profiles) from leaking into the
+core, and the build is where they run. `verify:package` fails if `dist-lib/`
+contains a `chunks/` folder, which is what Rollup does when two entries share a
+deep import: an opt-in entry may import the core only through its public entry,
+and must bind `version` from it, a value defined there, not a re-export. And CI
+builds the core alone and compares it with the core from the full build:
+`index.js` and its source map must be **byte-identical**. `npm test` carries
+the source-level half of the same rules (`package-boundaries`: import
+boundaries, no module-scope DOM access, nothing newer than ES2019 in
+`src/drawings` and `src/profiles`, and nothing that ships importing the demo
+site). `verify:package` also checks that neither entry carries the other's
+code, and that none of the demo site's code is in any shipped file. `npm run
+size` fails if the core grows more than 1.5 KB gzipped over the last release.
 
 React is an **optional peer dependency**, external in every build — importing
 `emberwick` never pulls React in.
@@ -1886,6 +2167,11 @@ src/drawings/               drawing tools (imports only ../chart/index.js)
   interaction/ hit-testing, snapping, the gesture state machine, keys, text editor
   render/      scene painter, motion, drawing theme, shared paint helpers
   Drawings.js  the controller (a chart plugin)   index.js  entry   index.d.ts  types
+src/profiles/               volume profiles (imports only ../chart/index.js)
+  data.js      the ProfileData contract: validation and one-time preparation
+  valueArea.js computeValueArea: POC and the 70% value area
+  render.js    geometry and the bin renderer   theme.js  colours from the chart theme
+  VolumeProfile.js  the controller (a `below` plugin)   index.js  entry   index.d.ts  types
 src/adapters/react/         <EmberwickChart /> + dataPlan (framework-agnostic)
 src/adapters/webcomponent/  <emberwick-chart>
 src/pages/, src/components/, src/App.jsx, src/styles.css   the demo site (not published)
@@ -1922,6 +2208,11 @@ Honest list of what isn't there yet:
   never collapsed *on purpose*, and there are no session bounds to fit or snap
   to. (Session boundaries are at least legible: the first axis label of each
   new day shows the date, in the configured zone.)
+- **Volume profiles are drawn, not computed.** `emberwick/profiles` renders
+  profiles you supply and will not bin one from the chart's bars; see
+  [Volume profiles](#volume-profiles) for why, and its
+  [limits](#size-and-limits) (the visible profile sums whole sessions; bins
+  behind the volume strip are clipped; no autoscale).
 - **Drawings: a minority of TradingView's tools.** No brush, callout,
   pitchfork, Gann, fib extension or time zones. Each is a new geometry for a
   minority of users, and the tool contract is the experimental part.

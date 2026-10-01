@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "build:lib": "vite build --config vite.lib.config.js",
-    "build:umd": "vite build --config vite.umd.config.js && vite build --config vite.umd-drawings.config.js",
+    "build:umd": "vite build --config vite.umd.config.js && vite build --config vite.umd-drawings.config.js && vite build --config vite.umd-profiles.config.js",
     "pack:lib": "node scripts/pack-lib.mjs",
     "size": "node scripts/check-size.mjs",
     "release": "npm test && npm run build:lib && npm run build:umd && npm run pack:lib && npm run verify:package && npm run size",

@@ -54,12 +54,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:lib
-      # "Drawings cost a core-only user nothing" is checked, not asserted: the
-      # core entry is rebuilt without the drawings entry and must match the
-      # shipped one byte for byte. If building drawings beside the core moves
-      # anything in index.js (a chunk split, a renamed binding, a hoisted
+      # "Drawings and profiles cost a core-only user nothing" is checked, not
+      # asserted: the core entry is rebuilt without the opt-in entries and must
+      # match the shipped one byte for byte. If building them beside the core
+      # moves anything in index.js (a chunk split, a renamed binding, a hoisted
       # module), this step is where it shows.
-      - name: Core is byte-identical with and without the drawings entry
+      - name: Core is byte-identical with and without the opt-in entries
         run: |
           EMBERWICK_CORE_ONLY=1 npx vite build --config vite.lib.config.js --outDir dist-core-check
           cmp dist-core-check/index.js dist-lib/index.js
@@ -71,7 +71,7 @@ jobs:
       - run: npm run verify:package
       - run: npm run size
       # Every module in a consumer's graph is evaluated in Node during an SSR
-      # build (Traed runs vite build --ssr). A module-scope reference to
+      # build (a host that server-renders runs one). A module-scope reference to
       # window or document would break their PRODUCTION build with a stack
       # trace pointing into node_modules — the library should be the one that
       # notices. Runs against the built package, not src.
@@ -87,7 +87,11 @@ jobs:
             if (typeof dr.enableDrawings !== 'function') throw new Error('drawings entry is broken')
             const r = dr.normalizeDrawings([{ type: 'trendLine', points: [{ time: 1, price: '2' }, { time: 2, price: 3 }] }])
             if (r.drawings.length !== 1 || r.report.loaded !== 1) throw new Error('normalizeDrawings is not pure/SSR-safe')
-            console.log('core, webcomponent and drawings entries import with no DOM; version', core.version)
+            const pr = await import('./profiles.js')
+            if (typeof pr.createVolumeProfile !== 'function') throw new Error('profiles entry is broken')
+            const va = pr.computeValueArea([1, 4, 9, 5, 1], 100, 0.5)
+            if (!va || va.poc !== 101.25) throw new Error('computeValueArea is not pure/SSR-safe')
+            console.log('core, webcomponent, drawings and profiles entries import with no DOM; version', core.version)
           "
 
       - name: What would be published
