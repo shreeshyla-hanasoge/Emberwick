@@ -6,16 +6,21 @@
  * nothing crashes when src/drawings reaches into the core through a deep
  * path, Rollup just starts splitting the core into chunks/ and a core-only
  * user downloads a second file. So the rules are checked here, on the source,
- * where the failure names the file and line that broke them:
+ * where the failure names the file and line that broke them.
  *
- *   1. Nothing under src/chart imports anything under src/drawings.
- *   2. src/drawings leaves its folder only through '../chart/index.js' or
- *      '../../chart/index.js', with named imports, never a namespace.
- *   3. src/drawings/index.js binds `version`, a value DEFINED in the core
- *      entry, which is what keeps Rollup from chunk-splitting the core.
+ * They hold for every OPT-IN ENTRY, which is src/drawings and src/profiles:
+ *
+ *   1. Nothing under src/chart imports anything under an opt-in entry.
+ *   2. An opt-in entry leaves its folder only through '../chart/index.js' or
+ *      '../../chart/index.js', with named imports, never a namespace. That
+ *      also keeps the entries apart: profiles cannot import drawings.
+ *   3. Its index.js binds `version`, a value DEFINED in the core entry,
+ *      which is what keeps Rollup from chunk-splitting the core.
  *   4. No module-scope window/document/navigator/matchMedia/
  *      requestAnimationFrame/HTMLElement: the entry must import under SSR.
  *   5. Nothing that needs a newer runtime than the ES2019 build target.
+ *   7. Nothing that ships (the core, the adapters, the opt-in entries)
+ *      imports the demo site's code under src/components or src/pages.
  *
  * Rule 6 (no new dependencies) lives in scripts/verify-package.mjs, because
  * this file may read only src/ and test/: the mutation harness copies nothing
@@ -39,6 +44,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const CORE_ENTRY = 'src/chart/index.js'
 const DRAWINGS_ENTRY = 'src/drawings/index.js'
+const PROFILES_ENTRY = 'src/profiles/index.js'
+/** Every opt-in entry: its folder, and the function a host calls first. */
+const OPT_IN = [
+  { dir: 'src/drawings', entry: DRAWINGS_ENTRY, creates: 'enableDrawings' },
+  { dir: 'src/profiles', entry: PROFILES_ENTRY, creates: 'createVolumeProfile' },
+]
+/** The demo site: a real chart on a real page, and no part of the package. */
+const DEMO = ['src/components', 'src/pages', 'src/App.jsx', 'src/main.jsx']
 const ALLOWED_CORE_SPECIFIERS = ['../chart/index.js', '../../chart/index.js']
 
 
@@ -513,21 +526,29 @@ function parseExports(src) {
 /** Resolve a relative specifier against a repo-relative importer. */
 const resolveSpec = (fromRel, spec) => posix.normalize(posix.join(posix.dirname(fromRel), spec))
 const isRelative = (spec) => spec.startsWith('./') || spec.startsWith('../')
-const inDrawings = (rel) => rel === 'src/drawings' || rel.startsWith('src/drawings/')
+const inDir = (rel, dir) => rel === dir || rel.startsWith(dir + '/')
+/** The opt-in entry folder a source file belongs to: 'src/drawings' for anything under it. */
+const folderOf = (rel) => rel.split('/').slice(0, 2).join('/')
 
-/** Rule 1 on one file: every specifier that lands in src/drawings. */
-function coreReachesDrawings(src, rel) {
+/** Every relative specifier of one file that lands in any of `dirs`. */
+function reaches(src, rel, dirs) {
   return parseImports(src)
-    .filter((im) => im.spec && isRelative(im.spec) && inDrawings(resolveSpec(rel, im.spec)))
+    .filter((im) => im.spec && isRelative(im.spec) && dirs.some((d) => inDir(resolveSpec(rel, im.spec), d)))
     .map((im) => `${where(rel, im.tok)} imports '${im.spec}'`)
 }
 
+/** Rule 1 on one file: every specifier that lands in an opt-in entry. */
+const coreReachesDrawings = (src, rel) => reaches(src, rel, OPT_IN.map((e) => e.dir))
+
 /**
- * Rule 2 on one file of src/drawings. `coreExports` is parseExports() of the
- * core entry, used to catch an import of a name the core does not export
- * (Rollup only warns about that, and the binding is then undefined).
+ * Rule 2 on one file of an opt-in entry (the folder is read off `rel`).
+ * `coreExports` is parseExports() of the core entry, used to catch an import
+ * of a name the core does not export (Rollup only warns about that, and the
+ * binding is then undefined).
  */
 function drawingsBoundaryViolations(src, rel, coreExports, exists = () => true) {
+  const folder = folderOf(rel)
+  const inDrawings = (target) => inDir(target, folder)
   const bad = []
   const typings = /\.d\.ts$/.test(rel)
   for (const im of parseImports(src)) {
@@ -539,7 +560,7 @@ function drawingsBoundaryViolations(src, rel, coreExports, exists = () => true) 
       continue
     }
     const spec = im.spec
-    if (!isRelative(spec)) { bad.push(`${at}: '${spec}' is a dependency — src/drawings has none`); continue }
+    if (!isRelative(spec)) { bad.push(`${at}: '${spec}' is a dependency — ${folder} has none`); continue }
     const target = resolveSpec(rel, spec)
     if (ALLOWED_CORE_SPECIFIERS.includes(spec) && target !== CORE_ENTRY) {
       const depth = rel.split('/').length - 2 // folders below src/
@@ -552,7 +573,7 @@ function drawingsBoundaryViolations(src, rel, coreExports, exists = () => true) 
       continue
     }
     if (!ALLOWED_CORE_SPECIFIERS.includes(spec)) {
-      bad.push(`${at}: '${spec}' leaves src/drawings — only ${ALLOWED_CORE_SPECIFIERS.map((s) => `'${s}'`).join(' or ')} may`)
+      bad.push(`${at}: '${spec}' leaves ${folder} — only ${ALLOWED_CORE_SPECIFIERS.map((s) => `'${s}'`).join(' or ')} may`)
       continue
     }
     if (im.namespace) { bad.push(`${at}: namespace ${im.kind === 'reexport-all' ? 're-export' : 'import'} of the core — import names`); continue }
@@ -701,64 +722,105 @@ test('the boundary check rejects every forbidden way to reach the core', () => {
   assert.deepEqual(coreReachesDrawings("import { Tween } from '../motion/Tween.js'", 'src/chart/core/Chart.js'), [])
 })
 
+test('the boundary check holds for every opt-in entry, and keeps the entries apart', () => {
+  const core = parseExports("export { isLight } from './core/color.js'\nexport const version = '1'")
+  const files = new Set(['src/profiles/index.js', 'src/profiles/valueArea.js', 'src/drawings/index.js'])
+  const check = (rel, src) => drawingsBoundaryViolations(src, rel, core, (f) => files.has(f))
+  assert.deepEqual(check('src/profiles/index.js', "import { version, isLight } from '../chart/index.js'"), [])
+  assert.deepEqual(check('src/profiles/index.js', "import { computeValueArea } from './valueArea.js'"), [])
+
+  const one = (rel, src, pattern) => {
+    const bad = check(rel, src)
+    assert.equal(bad.length, 1, `${src} -> ${JSON.stringify(bad)}`)
+    assert.match(bad[0], pattern)
+  }
+  one('src/profiles/index.js', "import { timeToIndex } from '../chart/core/time.js'", /leaves src\/profiles/)
+  one('src/profiles/index.js', "import { timeToIndex } from '../drawings/index.js'", /leaves src\/profiles/)
+  one('src/drawings/index.js', "import { computeValueArea } from '../profiles/index.js'", /leaves src\/drawings/)
+  one('src/profiles/index.js', "import { binSessions } from '../components/profileData.js'", /leaves src\/profiles/)
+  one('src/profiles/index.js', "import { Nope } from '../chart/index.js'", /does not export 'Nope'/)
+  one('src/profiles/index.js', "import React from 'react'", /src\/profiles has none/)
+
+  assert.equal(coreReachesDrawings("import { createVolumeProfile } from '../../profiles/index.js'", 'src/chart/core/Chart.js').length, 1,
+    'the core reaching into profiles is rule 1 too')
+  assert.equal(reaches("import { binSessions } from '../components/profileData.js'", 'src/profiles/index.js', DEMO).length, 1)
+  assert.equal(reaches("import { Demo } from '../../pages/Landing.jsx'", 'src/adapters/react/index.js', DEMO).length, 1)
+  assert.deepEqual(reaches("import { BRAND_PATHS } from '../../brand.js'", 'src/chart/render/watermark.js', DEMO), [], 'brand.js ships with the core')
+})
+
 // ============================================================ the real tree
 
 const chartFiles = listFiles('src/chart', isSource)
-const drawingsJs = listFiles('src/drawings', isJs)
-const drawingsTypings = listFiles('src/drawings', (n) => /\.d\.ts$/.test(n))
+const adapterFiles = listFiles('src/adapters', isSource)
+/** Each opt-in entry with its sources listed. */
+const ENTRIES = OPT_IN.map((e) => ({
+  ...e,
+  js: listFiles(e.dir, isJs),
+  typings: listFiles(e.dir, (n) => /\.d\.ts$/.test(n)),
+}))
 
-test('rule 1: nothing under src/chart imports anything under src/drawings', () => {
+test('rule 1: nothing under src/chart imports anything under an opt-in entry', () => {
   assert.ok(chartFiles.length > 10, `expected the core's sources, found ${chartFiles.length}`)
   const bad = chartFiles.flatMap((rel) => coreReachesDrawings(readRel(rel), rel))
-  assert.deepEqual(bad, [], 'the core must not know drawings exist')
+  assert.deepEqual(bad, [], 'the core must not know drawings or profiles exist')
 })
 
-test('rule 2: src/drawings leaves its folder only through the core entry, by name', () => {
-  const coreExports = parseExports(readRel(CORE_ENTRY))
-  assert.ok(coreExports.names && coreExports.names.has('createChart'), 'the core entry parsed')
-  const exists = (rel) => existsSync(join(ROOT, rel))
-  const bad = [...drawingsJs, ...drawingsTypings]
-    .flatMap((rel) => drawingsBoundaryViolations(readRel(rel), rel, coreExports, exists))
-  assert.deepEqual(bad, [])
+test('rule 7: nothing that ships imports the demo site', () => {
+  const shipped = [...chartFiles, ...adapterFiles, ...ENTRIES.flatMap((e) => [...e.js, ...e.typings])]
+  assert.ok(adapterFiles.length >= 2, `expected the adapters' sources, found ${adapterFiles.length}`)
+  const bad = shipped.flatMap((rel) => reaches(readRel(rel), rel, DEMO))
+  assert.deepEqual(bad, [], 'a demo helper (a data generator, a binning function) must never leak into the package')
 })
 
-test('rule 3: the drawings entry binds version, a value defined in the core entry', () => {
-  const src = readRel(DRAWINGS_ENTRY)
-  const fromCore = parseImports(src).filter((im) => im.spec === '../chart/index.js' && im.kind === 'static')
-  const binding = fromCore.flatMap((im) => im.names).find((n) => n.imported === 'version')
-  assert.ok(binding,
-    `${DRAWINGS_ENTRY} must import { version } from '../chart/index.js'. Importing only re-exports ` +
-    '(Smoothed, Tween, …) makes Rollup hoist the shared core modules into chunks/.')
+for (const { dir, entry, js, typings } of ENTRIES) {
+  test(`rule 2: ${dir} leaves its folder only through the core entry, by name`, () => {
+    assert.ok(js.length > 0, `expected sources under ${dir}`)
+    const coreExports = parseExports(readRel(CORE_ENTRY))
+    assert.ok(coreExports.names && coreExports.names.has('createChart'), 'the core entry parsed')
+    const exists = (rel) => existsSync(join(ROOT, rel))
+    const bad = [...js, ...typings]
+      .flatMap((rel) => drawingsBoundaryViolations(readRel(rel), rel, coreExports, exists))
+    assert.deepEqual(bad, [])
+  })
 
-  // It has to be DEFINED there. If the core's version ever became a
-  // re-export, the binding would stop anchoring the core to one file.
-  const core = parseExports(readRel(CORE_ENTRY))
-  assert.ok(core.defined.has('version'), `${CORE_ENTRY} must define \`version\` itself, not re-export it`)
+  test(`rule 3: ${entry} binds version, a value defined in the core entry`, () => {
+    const src = readRel(entry)
+    const fromCore = parseImports(src).filter((im) => im.spec === '../chart/index.js' && im.kind === 'static')
+    const binding = fromCore.flatMap((im) => im.names).find((n) => n.imported === 'version')
+    assert.ok(binding,
+      `${entry} must import { version } from '../chart/index.js'. Importing only re-exports ` +
+      '(Smoothed, Tween, …) makes Rollup hoist the shared core modules into chunks/.')
 
-  // The binding is used (the compatibility warning), so no tool drops it as dead.
-  const uses = tokenize(src).filter((t) => t.t === 'id' && t.v === binding.local).length
-  assert.ok(uses >= 2, `${binding.local} is imported but never used`)
+    // It has to be DEFINED there. If the core's version ever became a
+    // re-export, the binding would stop anchoring the core to one file.
+    const core = parseExports(readRel(CORE_ENTRY))
+    assert.ok(core.defined.has('version'), `${CORE_ENTRY} must define \`version\` itself, not re-export it`)
 
-  // And the reason is written down where the next person would delete it:
-  // the comment block directly above the import statement.
-  const statement = fromCore.find((im) => im.names.includes(binding))
-  const lines = src.slice(0, src.lastIndexOf('\n', statement.tok.i) + 1).split('\n').slice(0, -1)
-  const comment = []
-  while (lines.length && /^\s*(\/\/|\/\*|\*)/.test(lines[lines.length - 1])) comment.unshift(lines.pop())
-  const above = comment.join('\n')
-  assert.match(above, /rollup/i, 'the comment above the import names Rollup')
-  assert.match(above, /chunk/i, 'the comment above the import names the chunk split it prevents')
-})
+    // The binding is used (the compatibility warning), so no tool drops it as dead.
+    const uses = tokenize(src).filter((t) => t.t === 'id' && t.v === binding.local).length
+    assert.ok(uses >= 2, `${binding.local} is imported but never used`)
 
-test('rule 4: no module-scope browser globals anywhere in src/drawings', () => {
-  const bad = drawingsJs.flatMap((rel) => moduleScopeGlobals(readRel(rel), rel).map((h) => `${h.at} ${h.name}`))
-  assert.deepEqual(bad, [], 'browser globals may be read only inside functions (SSR imports every module)')
-})
+    // And the reason is written down where the next person would delete it:
+    // the comment block directly above the import statement.
+    const statement = fromCore.find((im) => im.names.includes(binding))
+    const lines = src.slice(0, src.lastIndexOf('\n', statement.tok.i) + 1).split('\n').slice(0, -1)
+    const comment = []
+    while (lines.length && /^\s*(\/\/|\/\*|\*)/.test(lines[lines.length - 1])) comment.unshift(lines.pop())
+    const above = comment.join('\n')
+    assert.match(above, /rollup/i, 'the comment above the import names Rollup')
+    assert.match(above, /chunk/i, 'the comment above the import names the chunk split it prevents')
+  })
 
-test('rule 5: nothing in src/drawings needs more than the ES2019 target', () => {
-  const bad = drawingsJs.flatMap((rel) => forbiddenApis(readRel(rel), rel).map((h) => `${h.at} ${h.name}: ${h.why}`))
-  assert.deepEqual(bad, [])
-})
+  test(`rule 4: no module-scope browser globals anywhere in ${dir}`, () => {
+    const bad = js.flatMap((rel) => moduleScopeGlobals(readRel(rel), rel).map((h) => `${h.at} ${h.name}`))
+    assert.deepEqual(bad, [], 'browser globals may be read only inside functions (SSR imports every module)')
+  })
+
+  test(`rule 5: nothing in ${dir} needs more than the ES2019 target`, () => {
+    const bad = js.flatMap((rel) => forbiddenApis(readRel(rel), rel).map((h) => `${h.at} ${h.name}: ${h.why}`))
+    assert.deepEqual(bad, [])
+  })
+}
 
 // ------------------------------------------------------ rule 4, dynamically
 
@@ -782,31 +844,46 @@ async function withoutDom(fn) {
 
 const importRel = (rel) => import(pathToFileURL(join(ROOT, rel)).href)
 
-test('rule 4: every module under src/drawings imports with no DOM and defines no browser global', async () => {
-  await withoutDom(async () => {
-    for (const rel of drawingsJs) {
-      await assert.doesNotReject(importRel(rel), `${rel} threw while being imported without a DOM`)
-    }
-    for (const name of ['window', 'document', 'matchMedia', 'requestAnimationFrame', 'HTMLElement']) {
-      assert.equal(typeof globalThis[name], 'undefined', `importing src/drawings defined a global ${name}`)
-    }
+for (const { dir, entry, creates, js } of ENTRIES) {
+  test(`rule 4: every module under ${dir} imports with no DOM and defines no browser global`, async () => {
+    await withoutDom(async () => {
+      for (const rel of js) {
+        await assert.doesNotReject(importRel(rel), `${rel} threw while being imported without a DOM`)
+      }
+      for (const name of ['window', 'document', 'matchMedia', 'requestAnimationFrame', 'HTMLElement']) {
+        assert.equal(typeof globalThis[name], 'undefined', `importing ${dir} defined a global ${name}`)
+      }
+    })
   })
-})
 
-test('rule 4: the drawings entry imports under SSR and normalizeDrawings is pure', async () => {
+  test(`rule 4: ${entry} imports under SSR and carries the core's version`, async () => {
+    await withoutDom(async () => {
+      const mod = await importRel(entry)
+      assert.equal(typeof mod[creates], 'function')
+      // One tree, one release: an entry and a core that disagree here would
+      // print the vendoring-mismatch warning on every page of a fresh install.
+      const core = await importRel(CORE_ENTRY)
+      assert.equal(mod.version, core.version, `${entry} and src/chart/index.js must carry the same version`)
+    })
+  })
+}
+
+test('rule 4: normalizeDrawings is pure under SSR', async () => {
   await withoutDom(async () => {
     const dr = await importRel(DRAWINGS_ENTRY)
-    assert.equal(typeof dr.enableDrawings, 'function')
     assert.equal(typeof dr.createDrawings, 'function')
     // The same call the CI SSR step makes against the built package.
     const r = dr.normalizeDrawings([{ type: 'trendLine', points: [{ time: 1, price: '2' }, { time: 2, price: 3 }] }])
     assert.equal(r.drawings.length, 1)
     assert.equal(r.report.loaded, 1)
     assert.equal(r.drawings.length, r.report.loaded + r.report.carried.length)
+  })
+})
 
-    // One tree, one release: a core and drawings that disagree here would
-    // print the vendoring-mismatch warning on every page of a fresh install.
-    const core = await importRel(CORE_ENTRY)
-    assert.equal(dr.version, core.version, 'src/drawings/index.js and src/chart/index.js must carry the same version')
+test('rule 4: computeValueArea is pure under SSR', async () => {
+  await withoutDom(async () => {
+    const pr = await importRel(PROFILES_ENTRY)
+    // A host's server computes profiles; it can check them with the same function the chart draws by.
+    assert.deepEqual(pr.computeValueArea([1, 4, 9, 5, 1], 100, 0.5), { poc: 101.25, vah: 102.5, val: 101 })
   })
 })

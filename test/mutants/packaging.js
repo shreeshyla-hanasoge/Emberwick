@@ -18,4 +18,12 @@ export const MUTANTS = [
     find: "import { version as coreVersion } from '../chart/index.js'",
     replace: "import { Smoothed as coreVersion } from '../chart/index.js'",
   },
+  {
+    // The same rule for the second opt-in entry: profiles built beside the
+    // core must not split it either.
+    name: 'Profiles stop binding a value defined in the core entry',
+    file: 'src/profiles/index.js',
+    find: "import { version as coreVersion } from '../chart/index.js'",
+    replace: "import { isLight as coreVersion } from '../chart/index.js'",
+  },
 ]
