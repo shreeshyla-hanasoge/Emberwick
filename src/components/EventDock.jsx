@@ -4,6 +4,7 @@ import { Icon } from './Icons.jsx'
 const TABS = [
   { id: 'selected', label: 'Selected' },
   { id: 'document', label: 'Document' },
+  { id: 'profile', label: 'Profile' },
   { id: 'events', label: 'Events' },
 ]
 
@@ -20,22 +21,30 @@ function jsonOf(value) {
 /**
  * The inspector: what the library actually stores, and what it actually
  * says. Every panel is a plain view of the public API. `Selected` is the
- * `select` event's payload, `Document` is `getDrawings()`, and `Events` is a
- * log of what the subscribers were told, in the order they were told. If the
- * demo ever disagrees with the docs, this is where it shows.
+ * `select` event's payload, `Document` is `getDrawings()`, `Profile` is the
+ * volume profile's `hover` payload, and `Events` is a log of what the
+ * subscribers were told, in the order they were told. If the demo ever
+ * disagrees with the docs, this is where it shows.
  */
-export default function EventDock({ dc, open, selected, log, docRev, onClear, onClose, children }) {
+export default function EventDock({ dc, open, selected, log, docRev, profile, onClear, onClose, children }) {
   const [tab, setTab] = useState('selected')
   const [copied, setCopied] = useState(false)
 
   const selText = useMemo(() => (selected ? jsonOf(selected) : ''), [selected])
+  // The payload as it arrives, except that `session` is the host's own
+  // object: its bins are summarised, or one hover would print eighty numbers.
+  const profText = useMemo(() => {
+    if (!profile) return ''
+    const s = profile.session
+    return jsonOf({ ...profile, session: s && { start: s.start, end: s.end, lo: s.lo, bins: `[${s.bins.length} volumes]`, ...(s.developing ? { developing: true } : {}) } })
+  }, [profile])
   // Rebuilt only while its tab is showing: a closed dock costs nothing per edit.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const docText = useMemo(() => (open && tab === 'document' && dc ? jsonOf(dc.getDrawings()) : ''), [open, tab, dc, docRev])
   const docCount = open && tab === 'document' && dc ? dc.getDrawings().length : 0
 
   const copy = async () => {
-    const text = tab === 'selected' ? selText : tab === 'document' ? jsonOf(dc ? dc.getDrawings() : []) : ''
+    const text = tab === 'selected' ? selText : tab === 'profile' ? profText : tab === 'document' ? jsonOf(dc ? dc.getDrawings() : []) : ''
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
@@ -84,6 +93,20 @@ export default function EventDock({ dc, open, selected, log, docRev, onClear, on
               <pre className="json">{docText || '[]'}</pre>
             </>
           )}
+          {tab === 'profile' &&
+            (profile ? (
+              <>
+                <p className="dock-note">
+                  <code>profile.on(&apos;hover&apos;, fn)</code> · the bin under the pointer
+                </p>
+                <pre className="json">{profText}</pre>
+              </>
+            ) : (
+              <p className="dock-empty">
+                Hover a bin of a volume profile. <code>hover</code> fires once per bin with its price range, volume, share of the
+                session and whether it is in the value area, and <code>null</code> when the pointer is over none.
+              </p>
+            ))}
           {tab === 'events' &&
             (log.length ? (
               <ol className="evlog">
@@ -106,7 +129,7 @@ export default function EventDock({ dc, open, selected, log, docRev, onClear, on
           {tab === 'events' ? (
             <button type="button" className="btn" onClick={onClear} disabled={!log.length}>Clear log</button>
           ) : (
-            <button type="button" className="btn" onClick={copy} disabled={tab === 'selected' && !selected}>
+            <button type="button" className="btn" onClick={copy} disabled={(tab === 'selected' && !selected) || (tab === 'profile' && !profile)}>
               {copied ? 'Copied' : 'Copy JSON'}
             </button>
           )}

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { createChart, RandomFeed, defaultTheme, lightTheme, mulberry32 } from '../chart/index.js'
 import { enableDrawings } from '../drawings/index.js'
+import { createVolumeProfile } from '../profiles/index.js'
 import BrandLogo from '../components/BrandLogo.jsx'
 import { Icon } from '../components/Icons.jsx'
 import ToolRail from '../components/ToolRail.jsx'
@@ -9,6 +10,7 @@ import DrawingMenu from '../components/DrawingMenu.jsx'
 import EventDock from '../components/EventDock.jsx'
 import { useDrawings } from '../components/useDrawings.js'
 import { starterDrawings } from '../components/starterDrawings.js'
+import { buildProfiles, binBars, hourOf } from '../components/profileData.js'
 
 const fmt = (v, d = 2) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '—')
 
@@ -63,10 +65,48 @@ function demoAnnotations(bars) {
         from: last.close * 0.995,
         to: last.close * 1.008,
         color: 'rgba(139,92,246,0.10)',
-        label: 'Value area',
+        // Not "Value area": the profile panel draws real ones now.
+        label: 'Demand zone',
       },
     ],
   }
+}
+
+const PROFILE_MODES = [
+  { id: 'session', label: 'Session', tip: 'One profile per session (here, per clock hour of the tape)' },
+  { id: 'visible', label: 'Visible', tip: 'One profile for every session on screen, summed' },
+  { id: 'both', label: 'Both', tip: 'Session profiles, with the visible-range profile on top' },
+]
+
+/** label, option key, tooltip: every boolean option of createVolumeProfile. */
+const PROFILE_FLAGS = [
+  ['Value area', 'valueArea', 'Tint the value-area bins and draw VAH and VAL'],
+  ['POC', 'poc', 'Draw the point-of-control line'],
+  ['Extend POC', 'extendPoc', 'Carry each POC right until a later bar trades through it'],
+  ['Tags', 'tags', 'POC, VAH and VAL tags on the price axis'],
+  ['Caption', 'label', 'The "Vol: …" caption naming the volume source'],
+  ['Hide future', 'hideFutureInReplay', 'Under replay, hide sessions the last revealed bar has not finished'],
+]
+
+const PROFILE_DEFAULTS = { valueArea: true, poc: true, extendPoc: false, tags: true, label: true, hideFutureInReplay: true }
+const PROFILE_SOURCE = 'EMBR 1-minute tape'
+
+const fmtVol = (v) => (typeof v === 'number' && isFinite(v) ? Math.round(v).toLocaleString() : '—')
+
+/** The 'hover' payload as one line: price range, volume, share, value-area flag. */
+function describeBin(h) {
+  return `${fmt(h.binLow)}–${fmt(h.binHigh)} · ${fmtVol(h.volume)} · ${fmt(h.pct, 1)}%${h.inValueArea ? ' · VA' : ''}${h.session ? '' : ' · visible range'}`
+}
+
+/**
+ * What the profile panel's developing session is built from: the bars of the
+ * newest clock hour. Returns where that hour starts in `bars`.
+ */
+function lastHourStart(bars) {
+  let i = bars.length - 1
+  const key = hourOf(bars[i].time)
+  while (i > 0 && hourOf(bars[i - 1].time) === key) i--
+  return i
 }
 
 const MAGNETS = [
@@ -224,6 +264,11 @@ export default function Playground() {
   const feedRef = useRef(null)
   const areaRef = useRef(null)
   const dcRef = useRef(null)
+  const vpRef = useRef(null)
+  /** Re-bin the whole tape into profiles; set by the chart effect, called by the controls. */
+  const rebuildRef = useRef(() => {})
+  /** What the live profile feed needs between ticks: the bin step, and the oldest bar it was built from. */
+  const pState = useRef({ step: 0, first: 0, on: true })
   const seeded = useRef(false)
   const stressIds = useRef(null)
   const logState = useRef({ n: 0, t0: 0 })
@@ -257,6 +302,15 @@ export default function Playground() {
   const [menu, setMenu] = useState(null)
   const [notice, setNotice] = useState(null)
   const [stressed, setStressed] = useState(false)
+
+  // ---- volume profiles -----------------------------------------------------
+  const [pOn, setPOn] = useState(true)
+  const [pMode, setPMode] = useState('session')
+  const [pSide, setPSide] = useState('right')
+  const [pWidth, setPWidth] = useState(30)
+  const [pFlags, setPFlags] = useState(PROFILE_DEFAULTS)
+  const [pColors, setPColors] = useState({})
+  const [pHover, setPHover] = useState(null)
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches)
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 760px)')
@@ -286,6 +340,11 @@ export default function Playground() {
     dcRef.current = dc
     setDc(dc)
 
+    // Volume profiles go on the layer UNDER the candles; drawings stay above
+    // and still get every press first. No data yet: it arrives with the tape.
+    const vp = createVolumeProfile(chart)
+    vpRef.current = vp
+
     const feed = new RandomFeed({
       symbol: 'EMBR',
       timeframe: 60000,
@@ -296,8 +355,44 @@ export default function Playground() {
     })
     feedRef.current = feed
 
+    /**
+     * The demo plays the HOST here. Emberwick draws profiles and never
+     * computes them, so this page bins its own 1-minute tape (the finest data
+     * it has) into the ProfileData contract, one session per clock hour, and
+     * hands that over. See components/profileData.js.
+     */
+    const rebuildProfiles = () => {
+      const bars = chart.replay ? chart.replay.source : chart.bars
+      if (!bars.length) return
+      const data = buildProfiles(bars, { sessionOf: hourOf, source: PROFILE_SOURCE, step: pState.current.step, developing: !chart.replay })
+      pState.current.step = data.step
+      pState.current.first = bars[0].time
+      vp.setData(data)
+    }
+    rebuildRef.current = rebuildProfiles
+    let offFeed = () => {}
+
     chart.setFeed(feed).then(() => {
-      if (!disposed) setReady(true)
+      if (disposed) return
+      setReady(true)
+      rebuildProfiles()
+      // Subscribed AFTER the chart, so chart.bars already holds this tick.
+      offFeed = feed.subscribe((msg) => {
+        const bars = chart.bars
+        const st = pState.current
+        if (!st.on || chart.replay || !bars.length || !st.step) return
+        // A lazily loaded history page landed in front: bin the new hours too.
+        if (bars[0].time !== st.first) { rebuildProfiles(); return }
+        const i = lastHourStart(bars)
+        // Every tick: the forming hour, re-binned and upserted by its start.
+        vp.upsertSession({ ...binBars(bars.slice(i), st.step), developing: true })
+        // The first bar of a new hour closes the hour before it: send that
+        // session once more, final, without the developing flag.
+        if (msg.type === 'append' && i === bars.length - 1 && i > 0) {
+          const prev = bars.slice(0, i)
+          vp.upsertSession(binBars(prev.slice(lastHourStart(prev)), st.step))
+        }
+      })
     })
 
     const off = chart.subscribe('crosshair', (payload) => {
@@ -342,6 +437,12 @@ export default function Playground() {
         setMenu({ x: p.x, y: p.y, id: p.id, part: p.part, drawing: p.drawing })
       }),
     ]
+    // The profile's one event. It fires once per bin, and null when the
+    // pointer is over none, so logging it is not a firehose.
+    vp.on('hover', (h) => {
+      setPHover(h)
+      if (h) say('hover', describeBin(h))
+    })
 
     const id = setInterval(() => {
       setFps(chart.fps)
@@ -357,6 +458,10 @@ export default function Playground() {
       offRange()
       offReplay()
       offs.forEach((off) => off())
+      offFeed()
+      rebuildRef.current = () => {}
+      vp.destroy()
+      vpRef.current = null
       dc.destroy()
       dcRef.current = null
       seeded.current = false
@@ -398,6 +503,34 @@ export default function Playground() {
       setClicked(null)
     }
   }, [showMarkers, ready])
+
+  // ---- profile wiring ------------------------------------------------------
+  // Every option of createVolumeProfile is a control, and every control is one
+  // setOptions() call: nothing here re-creates the profile.
+  useEffect(() => {
+    vpRef.current?.setOptions({
+      mode: pMode,
+      side: pSide,
+      width: pWidth / 100,
+      ...pFlags,
+      colors: Object.keys(pColors).length ? pColors : null,
+    })
+  }, [pMode, pSide, pWidth, pFlags, pColors])
+
+  useEffect(() => {
+    const vp = vpRef.current
+    pState.current.on = pOn
+    if (!vp || !ready) return
+    if (pOn) rebuildRef.current()
+    else { vp.setData(null); setPHover(null) }
+  }, [pOn, ready])
+
+  // Entering or leaving replay changes which bars are "all of them", and
+  // whether the last session is still forming.
+  useEffect(() => {
+    if (ready && pState.current.on) rebuildRef.current()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replaying])
 
   // ---- drawings wiring -----------------------------------------------------
   useEffect(() => { dc?.setMagnet(snapMode) }, [dc, snapMode])
@@ -568,7 +701,7 @@ export default function Playground() {
             <BrandLogo className="logo" />
           </a>
           <div>
-            <p>smooth flowing candles · pluggable feeds · drawing tools</p>
+            <p>smooth flowing candles · pluggable feeds · drawing tools · volume profiles</p>
           </div>
         </div>
 
@@ -720,6 +853,112 @@ export default function Playground() {
         </div>
       </div>
 
+      <div className="dbar pbar" onMouseDown={keepFocus}>
+        <div className="dgrp">
+          <button
+            type="button"
+            className={pOn ? 'btn ibtn on' : 'btn ibtn'}
+            aria-pressed={pOn}
+            onClick={() => setPOn((v) => !v)}
+            title="createVolumeProfile(chart, { data }): drawn under the candles, from data this page bins out of its own 1-minute tape"
+          >
+            Volume profile
+          </button>
+        </div>
+
+        <div className="dgrp" role="radiogroup" aria-label="Profile mode">
+          <span className="dlabel">Mode</span>
+          <div className="seg">
+            {PROFILE_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                role="radio"
+                aria-checked={pMode === m.id}
+                className={pMode === m.id ? 'on' : ''}
+                title={m.tip}
+                disabled={!pOn}
+                onClick={() => setPMode(m.id)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="dgrp" role="radiogroup" aria-label="Visible profile side">
+          <span className="dlabel">Side</span>
+          <div className="seg">
+            {['left', 'right'].map((side) => (
+              <button
+                key={side}
+                type="button"
+                role="radio"
+                aria-checked={pSide === side}
+                className={pSide === side ? 'on' : ''}
+                title="Which edge of the price pane the visible-range profile grows from"
+                disabled={!pOn || pMode === 'session'}
+                onClick={() => setPSide(side)}
+              >
+                {side === 'left' ? 'Left' : 'Right'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="prange" title="width: the longest bar, as a share of the session's span (or of the pane, for the visible profile)">
+          <span className="dlabel">Width</span>
+          <input type="range" min="5" max="100" step="5" value={pWidth} disabled={!pOn} onChange={(e) => setPWidth(+e.target.value)} />
+          <b>{pWidth}%</b>
+        </label>
+
+        <div className="dgrp">
+          {PROFILE_FLAGS.map(([label, key, tip]) => (
+            <button
+              key={key}
+              type="button"
+              className={pFlags[key] ? 'btn ibtn on' : 'btn ibtn'}
+              aria-pressed={pFlags[key]}
+              title={`${key}: ${tip}`}
+              disabled={!pOn}
+              onClick={() => setPFlags((f) => ({ ...f, [key]: !f[key] }))}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="dgrp" title="colors: overrides the theme. Reset hands the colours back to it.">
+          <span className="dlabel">Colours</span>
+          <label className="pcolor">
+            <input
+              type="color"
+              value={pColors.poc || (dark ? '#ff9f43' : '#c2570c')}
+              disabled={!pOn}
+              onChange={(e) => setPColors((c) => ({ ...c, poc: e.target.value }))}
+              aria-label="POC colour"
+            />
+            POC
+          </label>
+          <label className="pcolor">
+            <input
+              type="color"
+              value={pColors.valueArea ? pColors.valueArea.slice(0, 7) : (dark ? '#e2e8f4' : '#1f2937')}
+              disabled={!pOn}
+              // A solid colour would hide the grid, so the picked hue is applied at the default strengths.
+              onChange={(e) => setPColors((c) => ({ ...c, fill: `${e.target.value}30`, valueArea: `${e.target.value}58`, hover: `${e.target.value}90` }))}
+              aria-label="Bin colour"
+            />
+            Bins
+          </label>
+          <button type="button" className="btn ibtn" disabled={!pOn || !Object.keys(pColors).length} onClick={() => setPColors({})}>Reset</button>
+        </div>
+
+        <span className={`pread${pHover ? '' : ' live-idle'}`} aria-live="off">
+          {pHover ? describeBin(pHover) : "hover a bin · on('hover')"}
+        </span>
+      </div>
+
       <div className="stage">
         <div onMouseDown={keepFocus} className="rail-wrap">
           <ToolRail dc={dc} tool={tool} sticky={sticky} orientation={narrow ? 'horizontal' : 'vertical'} />
@@ -761,6 +1000,7 @@ export default function Playground() {
           open={dockOpen}
           selected={selected}
           log={log}
+          profile={pHover}
           docRev={docRev}
           onClear={() => setLog([])}
           onClose={() => setDockOpen(false)}
