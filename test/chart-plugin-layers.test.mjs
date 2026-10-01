@@ -372,6 +372,18 @@ test('a frame that paints only the other layer does not reset a failing below dr
   assert.equal(chart._plugins[0].below, false)
 })
 
+// ---------------------------------------------------------------------- host
+
+test('host.volumeRatio is the chart\'s volume strip share, so a below plugin can stay clear of the strip', () => {
+  const chart = charted()
+  let host = null
+  chart.addPlugin({ layer: 'below', attach(h) { host = h } })
+  assert.equal(host.volumeRatio, 0.18, 'the default')
+  const custom = charted({ volumeRatio: 0.3 })
+  custom.addPlugin({ attach(h) { host = h } })
+  assert.equal(host.volumeRatio, 0.3)
+})
+
 // ----------------------------------------------------------------- lifecycle
 
 test('destroy detaches every plugin in reverse stack order while its canvas exists', () => {

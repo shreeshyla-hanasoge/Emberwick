@@ -52,6 +52,18 @@ export interface Theme {
   drawingLine?: string
   /** Fibonacci level colours, in level order (emberwick/drawings). */
   drawingFib?: string[]
+  /**
+   * Bins of a volume profile outside its value area (emberwick/profiles). The
+   * core never reads the four profile keys; each falls back to a colour
+   * derived from `background`. Use rgba(): the candles are drawn over it.
+   */
+  profileFill?: string
+  /** Bins inside the value area (emberwick/profiles). */
+  profileValueArea?: string
+  /** The point-of-control line and its tag (emberwick/profiles). */
+  profilePoc?: string
+  /** The value-area high and low lines and their tags (emberwick/profiles). Falls back to `text`. */
+  profileVaLine?: string
 }
 
 /**
@@ -848,6 +860,11 @@ export interface PluginHost {
   readonly plotBottom: number
   /** chart.options.magnet. */
   readonly magnet: boolean
+  /**
+   * chart.options.volumeRatio: the share of the price pane's height, at its
+   * bottom, that the volume strip is drawn in when a visible bar has volume.
+   */
+  readonly volumeRatio: number
   readonly priceLines: readonly PriceLine[]
   /** options.animate !== false; setAnimate() updates it. */
   readonly animate: boolean

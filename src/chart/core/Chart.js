@@ -2066,6 +2066,7 @@ export class Chart {
       get pixelRatio() { return chart.layers.dpr },
       get plotBottom() { const r = chart._panes[chart._panes.length - 1].rect; return r.y + r.h },
       get magnet() { return chart.options.magnet !== false },
+      get volumeRatio() { return chart.options.volumeRatio },
       get priceLines() { return chart.priceLines },
       get animate() { return chart.options.animate !== false },
       get exporting() { return chart._pluginInfo.exporting },
