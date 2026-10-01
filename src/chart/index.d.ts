@@ -799,6 +799,21 @@ export interface PluginFrameInfo {
 }
 
 /**
+ * Options of host.drawPriceTag.
+ * @experimental
+ */
+export interface PriceTagOptions {
+  /** Box fill. Defaults to theme.textStrong, as a price line's does. */
+  color?: string
+  /** Defaults to theme.tagText. */
+  textColor?: string
+  /** The pane whose scale and axis the tag belongs to. Defaults to the price pane. */
+  pane?: PaneView
+  /** Defaults to host.formatPrice(price, pane). */
+  text?: string
+}
+
+/**
  * The chart as one attached plugin sees it. One object per attachment, all
  * getters: every read is live.
  * @experimental
@@ -858,6 +873,17 @@ export interface PluginHost {
   indexToTime(index: number): number | null
   /** With the decimals the pane's own axis uses (the price pane by default). */
   formatPrice(price: number, pane?: PaneView): string
+  /**
+   * Draw the price-axis gutter tag a core price line draws, at `price`: the
+   * same box, font and text position, from the same code. Nothing is drawn
+   * when the price is outside the pane. Call it from draw(), with the context
+   * you were handed. It sets font, textBaseline, textAlign and fillStyle and
+   * does not restore them (your draw is already save/restore-wrapped).
+   *
+   * The tag is painted on your layer, so the crosshair's tag covers it, and a
+   * `below` plugin's tag also sits under the last-price and price-line tags.
+   */
+  drawPriceTag(ctx: CanvasRenderingContext2D, price: number, opts?: PriceTagOptions): void
   /** Emits the chart's 'error' event, phase `plugin <phase>`. */
   reportError(err: unknown, phase: string): void
 }

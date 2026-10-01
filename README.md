@@ -1351,17 +1351,29 @@ own test, so you agree with its gestures) and the pane under it.
 replay dataset: **resolve anchors against this**), `replay`, `timeframeMs`,
 `barGen`, `panes`, `theme`, `fmt`, `width`, `height`, `pixelRatio`,
 `plotBottom`, `magnet`, `priceLines`, `animate` and `exporting`; and the
-methods `invalidate()`, `setCursor(css)`, `setHover(css)`, `setCrosshair(point)`,
-`release()`, `paneAt(y)`, `paneById(id)`, `timeToIndex(time)`,
-`indexToTime(index)`, `formatPrice(price, pane?)` and `reportError(err, phase)`.
+methods `invalidate()`, `setCursor(css)`, `setHover(css)`,
+`setCrosshair(point)`, `release()`, `paneAt(y)`, `paneById(id)`,
+`timeToIndex(time)`, `indexToTime(index)`, `formatPrice(price, pane?)`,
+`drawPriceTag(ctx, price, opts?)` and `reportError(err, phase)`. Plugins must
+not read `_`-prefixed chart members; everything they need is here or public on
+`host.chart`. The `panes` are the chart's live pane objects, so `visible` is
+rebuilt every frame: do not keep it.
+
 `timeToIndex` gives the **fractional** bar index of a time in ms, resolved
 against `source`: exact on a bar, linear across a session gap, extrapolated
 past either end, so `host.ts.x(host.timeToIndex(t))` is where that moment is
 drawn. The same pair is exported from the core as pure functions,
 `timeToIndex(bars, time, timeframeMs)` and `indexToTime(bars, index,
-timeframeMs)`. Plugins must not read `_`-prefixed chart members;
-everything they need is here or public on `host.chart`. The `panes` are the
-chart's live pane objects, so `visible` is rebuilt every frame: do not keep it.
+timeframeMs)`.
+
+`drawPriceTag(ctx, price, { color, textColor, pane, text })` draws the
+price-axis gutter tag that a core price line draws, from the same code, so a
+plugin's level and a price line's are the same object on the axis. The text
+defaults to `formatPrice(price, pane)`, the fill to `theme.textStrong`, and a
+price outside the pane draws nothing. Call it from `draw` with the context you
+were given. The tag lands on your own layer: the crosshair's tag always covers
+it, and a `below` plugin's tag also sits under the last-price tag and under
+price-line tags, which are drawn with the candles.
 
 **Layer order.** Attaching the first plugin creates a fourth canvas, and the
 stack becomes `base`, `main`, **`plugins`**, `overlay`, which moves the

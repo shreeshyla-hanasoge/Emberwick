@@ -81,6 +81,24 @@ export function drawZones(ctx, s) {
   ctx.restore()
 }
 
+/* -------------------------------------------------------------- price tag -- */
+/**
+ * The price-axis gutter tag: a filled box at `y` with `label` inside it.
+ *
+ * One implementation for the core's price lines and for plugins
+ * (host.drawPriceTag), so a plugin's level reads as the same object a price
+ * line's does instead of a near copy that drifts by a pixel. The caller sets
+ * the font and a 'middle' baseline, and culls a y outside the pane.
+ */
+export function drawPriceTag(ctx, plot, y, label, color, textColor) {
+  ctx.textAlign = 'left'
+  const lw = ctx.measureText(label).width
+  ctx.fillStyle = color
+  ctx.fillRect(plot.w + 1, y - 9, lw + 14, 18)
+  ctx.fillStyle = textColor
+  ctx.fillText(label, plot.w + 8, y)
+}
+
 /* ------------------------------------------------------------- price lines -- */
 /** Horizontal lines with an optional left title pill and right axis tag. */
 export function drawPriceLines(ctx, s) {
@@ -129,13 +147,7 @@ export function drawPriceLines(ctx, s) {
     }
 
     if (L.axisLabel !== false) {
-      const label = price.toFixed(dec)
-      ctx.textAlign = 'left'
-      const lw = ctx.measureText(label).width
-      ctx.fillStyle = color
-      ctx.fillRect(plot.w + 1, y - 9, lw + 14, 18)
-      ctx.fillStyle = L.tagTextColor || theme.tagText
-      ctx.fillText(label, plot.w + 8, y)
+      drawPriceTag(ctx, plot, y, price.toFixed(dec), color, L.tagTextColor || theme.tagText)
     }
   }
 

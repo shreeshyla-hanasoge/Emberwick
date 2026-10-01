@@ -11,7 +11,7 @@ import { Replay } from '../replay/Replay.js'
 import { drawGrid, drawPriceAxis } from '../render/grid.js'
 import { drawCandles } from '../render/candles.js'
 import { drawCrosshair } from '../render/crosshair.js'
-import { drawZones, drawPriceLines, drawMarkers } from '../render/annotations.js'
+import { drawZones, drawPriceLines, drawMarkers, drawPriceTag } from '../render/annotations.js'
 import { normalizeMarkers, resolveMarkers, layoutMarkers } from '../overlays/annotations.js'
 import {
   normalizeSeries,
@@ -2045,6 +2045,11 @@ export class Chart {
   _makeHost(rec) {
     const chart = this
     const source = () => (chart._replay ? chart._replay.source : chart.bars)
+    const formatPrice = (price, pane) => {
+      const pn = pane || chart._panes[0]
+      const { step } = priceTicks(pn.ps.lo, pn.ps.hi, Math.max(2, Math.floor(pn.rect.h / 58)))
+      return toNumber(price).toFixed(decimalsFor(step))
+    }
     return {
       chart,
       get ts() { return chart.ts },
@@ -2087,10 +2092,16 @@ export class Chart {
       // timeframe per bar instead of landing on the bar it names.
       timeToIndex(time) { return timeToIndex(source(), time, chart.ts.timeframeMs) },
       indexToTime(u) { return indexToTime(source(), u, chart.ts.timeframeMs) },
-      formatPrice(price, pane) {
-        const pn = pane || chart._panes[0]
-        const { step } = priceTicks(pn.ps.lo, pn.ps.hi, Math.max(2, Math.floor(pn.rect.h / 58)))
-        return toNumber(price).toFixed(decimalsFor(step))
+      formatPrice,
+      drawPriceTag(ctx, price, o = {}) {
+        const pane = o.pane || chart._panes[0]
+        const y = Math.round(pane.ps.y(toNumber(price))) + 0.5
+        // Culled exactly as a price line's tag is; a NaN price fails both.
+        if (!(y >= pane.rect.y && y <= pane.rect.y + pane.rect.h)) return
+        ctx.font = chart.theme.font
+        ctx.textBaseline = 'middle'
+        drawPriceTag(ctx, pane.rect, y, o.text != null ? String(o.text) : formatPrice(price, pane),
+          o.color || chart.theme.textStrong, o.textColor || chart.theme.tagText)
       },
       reportError(err, phase) { chart._emitError(err, 'plugin ' + phase) },
     }
