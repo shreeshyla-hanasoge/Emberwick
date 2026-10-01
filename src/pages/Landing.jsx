@@ -3,6 +3,7 @@ import { createChart, RandomFeed, defaultTheme, version } from '../chart/index.j
 import { enableDrawings } from '../drawings/index.js'
 import BrandLogo from '../components/BrandLogo.jsx'
 import DrawingsShowcase from '../components/DrawingsDemo.jsx'
+import ProfilesShowcase from '../components/ProfilesDemo.jsx'
 import ToolRail from '../components/ToolRail.jsx'
 import { useDrawings } from '../components/useDrawings.js'
 import { pickScenes } from '../components/scenes.js'
@@ -477,7 +478,7 @@ function SeriesChart() {
  * instruments never trade through.
  */
 /** The release whose tag is accented. Everything else reads "since". */
-const CURRENT_RELEASE = '0.12.0'
+const CURRENT_RELEASE = '0.13.0'
 
 const ZONES = [
   { id: 'Asia/Kolkata', label: 'Mumbai' },
@@ -861,7 +862,7 @@ function CopyLine({ text }) {
 }
 
 const STATS = [
-  { v: '20.3', u: 'KB', l: 'gzipped UMD core' },
+  { v: '21.2', u: 'KB', l: 'gzipped UMD core' },
   { v: '0', u: '', l: 'dependencies' },
   { v: '60', u: 'fps', l: 'with a live feed' },
   { v: 'MIT', u: '', l: 'licensed' },
@@ -873,6 +874,10 @@ const SHAPES = [
 ]
 
 const FEATURES = [
+  {
+    t: 'Volume profiles',
+    d: 'Session and visible-range profiles with the point of control and the value area, drawn under the candles from data you supply. Bins stay fixed in price while the axis eases, the forming session updates live, and replay hides a session until it has finished. A separate entry, absent until you import it.',
+  },
   {
     t: 'Drawing tools',
     d: 'Trendlines, rays, channels, rectangles, Fibonacci, measure, long and short positions and text, anchored to time and price so they hold through zoom, pan, reloads and history prepends. A separate entry: a chart that never imports it carries none of the code.',
@@ -887,7 +892,7 @@ const FEATURES = [
   },
   {
     t: 'A plugin seam',
-    d: 'chart.addPlugin() gives an opt-in layer its own canvas and the first offer of every gesture. Drawings are built on it, so can yours be. Experimental, and measured: +4.2 KB gzipped in the core ESM, and nothing at all while no plugin is attached.',
+    d: 'chart.addPlugin() gives an opt-in layer its own canvas, above the candles or below them, and the first offer of every gesture. Drawings and volume profiles are built on it, so can yours be. Experimental, and measured: +4.2 KB gzipped in the core ESM when it arrived, +1.28 KB more for the layer under the candles, and nothing at all while no plugin is attached.',
   },
   {
     t: 'Motion, not repaints',
@@ -1083,6 +1088,7 @@ export default function Landing() {
         </a>
         <nav className="lp-navlinks">
           <a href="#features">Features</a>
+          <a href="#profiles">Profiles</a>
           <a href="#drawings">Drawings</a>
           <a href="#panes">Panes</a>
           <a href="#view">Sessions</a>
@@ -1100,7 +1106,7 @@ export default function Landing() {
       {/* ---- hero ---- */}
       <section className="lp-hero">
         <span className="lp-pill">
-          <span className="lp-pulse" /> new in v{CURRENT_RELEASE} — drawing tools
+          <span className="lp-pulse" /> new in v{CURRENT_RELEASE} — volume profiles
         </span>
         <h1>
           Candlestick charts that
@@ -1109,7 +1115,7 @@ export default function Landing() {
         </h1>
         <p className="lp-sub">
           A canvas charting core for financial frontends. Ticks ease in, axes glide,
-          panning carries momentum — and the core is 20.3&nbsp;KB gzipped with
+          panning carries momentum — and the core is 21.2&nbsp;KB gzipped with
           zero dependencies. Plug in your own data feed and drop it into any stack.
         </p>
 
@@ -1157,6 +1163,88 @@ export default function Landing() {
       {/* Feature sections run NEWEST FIRST, so the version tags descend as you
           scroll and the current release is the first one you meet. Only the
           newest carries an accent tag; see VersionTag. */}
+      {/* ---- volume profiles ---- */}
+      <section className="lp-section" id="profiles">
+        <VersionTag v="0.13.0" />
+        <h2>See where the volume traded</h2>
+        <p className="lp-lede">
+          A volume profile shows how much traded at each price: one per session,
+          or one for everything on screen, with the point of control and the
+          value area marked. Emberwick draws the profiles your application gives
+          it and does not invent them from candles, because 5-minute bars cannot
+          say where inside them the volume went. The chart below is fed 1-minute
+          data binned by this page, live.
+        </p>
+
+        <ProfilesShowcase />
+
+        <div className="lp-annofacts">
+          <div className="lp-annofact">
+            <h3>Data in, pixels out</h3>
+            <p>
+              You send a bin <code>step</code> and, per session, a{' '}
+              <code>start</code>, an <code>end</code>, a low edge and an array of
+              volumes. POC and value area are optional; the 70% area is computed
+              when you leave them out, by an exported, pure{' '}
+              <code>computeValueArea</code>. The demo bins its own 1-minute
+              bars and draws 5-minute candles: open the second tab to read what
+              it sends.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Under the candles</h3>
+            <p>
+              Profiles paint on a plugin layer <em>below</em> the candles, new
+              in this release, so wicks and bodies stay on top and the volume
+              strip is never overprinted. It claims no gesture: drag across a
+              profile and the chart pans, and the crosshair and cursor do
+              exactly what they did.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Fixed bins, no shimmer</h3>
+            <p>
+              Every bin edge is a price from your data, projected through the
+              price scale each frame. Nothing is binned in pixel rows, so the
+              bars hold still against the candles while the axis eases. Zoom
+              out and bins thinner than a pixel merge into one row, as long as
+              the longest of them.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Live and replay-safe</h3>
+            <p>
+              <code>upsertSession()</code> replaces the forming session by its
+              start: the one growing above is sent again every minute. Under
+              replay a session stays hidden until its last bar is revealed, so
+              a profile never shows how a day traded before it has. Press{' '}
+              <em>Replay two sessions</em> and watch them arrive.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>One view, or every session</h3>
+            <p>
+              <em>Session</em> scales each day within itself, so a quiet one is
+              as legible as a busy one. <em>Visible</em> sums the sessions on
+              screen into one profile at the side, and re-sums only when that
+              set changes. <em>Extend POC</em> carries each point of control
+              right until a later bar trades through it.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Nothing until you import it</h3>
+            <p>
+              <code>emberwick/profiles</code> is its own entry: 6.2&nbsp;KB
+              gzipped as a minified UMD, 9.7&nbsp;KB as unminified ESM, and only
+              when you import it. The layer and the helpers it needed from the
+              core cost every chart +0.86&nbsp;KB in the UMD core
+              (+1.28&nbsp;KB in the ESM), and the core entry is byte-identical
+              with or without the profiles built beside it.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* ---- drawings ---- */}
       <section className="lp-section" id="drawings">
         <VersionTag v="0.12.0" />
@@ -1224,9 +1312,9 @@ export default function Landing() {
             <h3>Nothing until you import it</h3>
             <p>
               <code>emberwick/drawings</code> is its own entry. The core entry is
-              byte-identical with or without it; the generic plugin seam is +4.2&nbsp;KB
-              gzipped in the core ESM. The drawings themselves are 52.8&nbsp;KB
-              gzipped as a minified UMD (71.9&nbsp;KB as unminified ESM), and only
+              byte-identical with or without it; the generic plugin seam was +4.2&nbsp;KB
+              gzipped in the core ESM when it arrived. The drawings themselves are 52.4&nbsp;KB
+              gzipped as a minified UMD (71.3&nbsp;KB as unminified ESM), and only
               when you import them.
             </p>
           </div>
@@ -1517,7 +1605,8 @@ chart.subscribe('markerClick', (m) => openTicket(m.data.orderId))`}</pre>
       <section className="lp-section" id="usage">
         <h2>Four lines to a live chart</h2>
         <p className="lp-lede">
-          One core, four entry points. Import only the one your stack needs.
+          One core, with adapters and opt-in entries beside it. Import only what
+          your stack needs.
         </p>
 
         <div className="lp-codegrid">
@@ -1547,6 +1636,15 @@ await chart.setFeed(new RandomFeed({ timeframe: 60_000 }))`}</pre>
   theme="dark"
   style="height:420px"
 ></emberwick-chart>`}</pre>
+          </div>
+
+          <div className="lp-code">
+            <div className="lp-codehead">Volume profiles</div>
+            <pre>{`import { createVolumeProfile } from 'emberwick/profiles'
+
+const profile = createVolumeProfile(chart, { data, mode: 'both' })
+profile.upsertSession(developing)   // live: the forming session
+profile.on('hover', (bin) => readout(bin))`}</pre>
           </div>
 
           <div className="lp-code">

@@ -787,7 +787,7 @@ kbd {
   .lp-navlinks { gap: 12px; }
 }
 @media (max-width: 940px) {
-  .lp-navlinks a:not(.lp-navcta):not([href='#features']):not([href='#drawings']) { display: none; }
+  .lp-navlinks a:not(.lp-navcta):not([href='#features']):not([href='#profiles']):not([href='#drawings']) { display: none; }
 }
 
 /* ---- hero ---- */
@@ -1705,6 +1705,61 @@ kbd {
 .lp-codenote code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--accent); }
 .lp-codenote + pre { padding-top: 10px; }
 
+/* ---- volume profiles demo -------------------------------------------- */
+/* Full width, unlike the drawings demo: a profile needs two or three sessions
+   on screen to make its point, and a half-width chart holds barely one. */
+.lp-profdemo { margin-top: 36px; }
+.lp-profwrap { margin: 0; box-shadow: 0 18px 50px rgba(0,0,0,0.42); }
+/* The title bar carries the controls, so it wraps: on a phone the title takes
+   a row and the controls take the next, instead of running off the edge. */
+.lp-profbar { flex-wrap: wrap; row-gap: 8px; min-height: 48px; padding-top: 8px; padding-bottom: 8px; }
+.lp-profbar .lp-chartbar-title { margin-right: auto; }
+.lp-profctl { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.lp-profctl .lp-showbtn { margin-left: 2px; }
+.lp-profseg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.lp-profseg button, .lp-proftog {
+  font: inherit; font-size: 11.5px; font-weight: 580;
+  color: var(--muted); background: transparent;
+  border: 0; padding: 5px 11px;
+  cursor: pointer; white-space: nowrap;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.lp-profseg button + button { border-left: 1px solid var(--border); }
+.lp-profseg button:hover, .lp-proftog:hover { color: var(--text); }
+.lp-profseg button.on { color: var(--accent); background: rgba(38,166,154,0.12); }
+.lp-proftog { border: 1px solid var(--border); border-radius: 999px; }
+.lp-proftog.on { color: var(--accent); border-color: rgba(38,166,154,0.45); background: rgba(38,166,154,0.10); }
+.lp-chart-prof { height: 440px; }
+/* The narration sits a little lower here than on the drawings demo: the
+   profile's own "Vol: …" caption hangs from the top edge of the plot. Only
+   where the pill is at the top at all: on a phone it moves to the bottom. */
+@media (min-width: 621px) {
+  .lp-profdemo .lp-coach { top: 24px; }
+}
+
+.lp-profgrid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1.05fr;
+  gap: 16px;
+  align-items: start;
+}
+.lp-profside .lp-serieslegend { margin-top: 0; }
+.lp-profside .lp-annoread { min-height: 96px; }
+.lp-profread { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; font-variant-numeric: tabular-nums; }
+.lp-profread b { color: #ff9f43; font-weight: 640; }
+.lp-profread i { font-style: normal; font-weight: 500; color: var(--muted); font-size: 12.5px; }
+.lp-annoread code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px; color: var(--accent);
+}
+.lp-profcode pre { max-height: 300px; overflow: auto; }
+
 @media (prefers-reduced-motion: reduce) {
   .lp-coach, .lp-coach-t, .lp-coach-dot, .rail-nudge .rail-btn { transition: none; animation: none; }
 }
@@ -1715,6 +1770,7 @@ kbd {
   .lp-codegrid { grid-template-columns: 1fr; }
   .lp-stats { grid-template-columns: repeat(2, 1fr); }
   .lp-annogrid { grid-template-columns: 1fr; }
+  .lp-profgrid { grid-template-columns: 1fr; }
   .lp-annofacts { grid-template-columns: 1fr; }
   .lp-annocode pre { max-height: none; }
   /* stacked, the panel is as tall as what it holds (and the data view scrolls past 440px) */
