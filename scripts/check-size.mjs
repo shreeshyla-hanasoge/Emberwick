@@ -34,12 +34,18 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  * additions (the `below` layer, timeToIndex/indexToTime, host.drawPriceTag
  * and isLight) measured 37.3 KB and 21.2 KB. What bounds them is not these
  * ceilings but MAX_CORE_GROWTH below.
+ *
+ * The profiles budgets follow the drawings' rule, ceil(1.2 × measured):
+ * 9.7 KB for the unminified ESM gives 12, and 6.2 KB for the minified UMD
+ * gives 8.
  */
 const BUDGETS = [
   ['dist-lib/umd/emberwick.umd.js', 22],
   ['dist-lib/index.js', 38], // unminified ESM; consumers minify
   ['dist-lib/umd/emberwick-drawings.umd.js', 63],
   ['dist-lib/drawings.js', 85], // unminified ESM
+  ['dist-lib/umd/emberwick-profiles.umd.js', 8],
+  ['dist-lib/profiles.js', 12], // unminified ESM
 ]
 
 /**

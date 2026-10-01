@@ -253,6 +253,154 @@ if (drawingsEsm !== null) {
   }
 }
 
+// ---------------------------------------------------------------- profiles
+//
+// The same guards for the second opt-in entry, `emberwick/profiles`: one
+// file, reaching the core only as './index.js', carrying no copy of it,
+// leaving nothing of itself in the core, and a UMD that runs in a browser,
+// under CommonJS, and says what is wrong when loaded alone or before a core
+// too old for it.
+
+const profilesEsm = await read('profiles.js')
+const PROFILES_UMD = 'umd/emberwick-profiles.umd.js'
+
+if (profilesEsm === null) fail('dist-lib/profiles.js is missing')
+else {
+  const specs = [
+    ...[...profilesEsm.matchAll(/^\s*(?:import|export)\b[^'"`;]*?\bfrom\s*['"]([^'"]+)['"]/gm)].map((m) => m[1]),
+    ...[...profilesEsm.matchAll(/^\s*import\s*['"]([^'"]+)['"]/gm)].map((m) => m[1]),
+    ...[...profilesEsm.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]/g)].map((m) => m[1]),
+  ]
+  const stray = specs.filter((sp) => sp !== './index.js')
+  if (stray.length) fail(`profiles.js imports ${stray.map((x) => `'${x}'`).join(', ')} — only './index.js' is allowed`)
+  else if (!specs.length) fail("profiles.js does not import './index.js' — it must be carrying its own core")
+  else ok("profiles.js imports only './index.js'")
+
+  if (profilesEsm.includes(CORE_STRING)) fail('profiles.js bundles a second copy of the core')
+  else ok('profiles.js does not bundle the core')
+}
+
+/**
+ * No profile code in the core, and none in the drawings entry either: the
+ * opt-in entries are independent. Same shape as check (d), with the same
+ * positive control so a reworded message cannot make it vacuous.
+ */
+const PROFILE_SENTINELS = [
+  'createVolumeProfile needs an Emberwick chart',
+  'upsertSession() needs setData() first',
+  'computeValueArea',
+]
+for (const [rel, text] of [['index.js', coreEsm], ['umd/emberwick.umd.js', coreUmd], ['drawings.js', drawingsEsm]]) {
+  if (text === null) continue
+  const code = stripComments(text)
+  const leaked = PROFILE_SENTINELS.filter((x) => code.includes(x))
+  if (leaked.length) fail(`profile code leaked: ${rel} contains ${leaked.map((x) => `"${x}"`).join(', ')}`)
+  else ok(`${rel} contains no profile code`)
+}
+if (profilesEsm !== null) {
+  const code = stripComments(profilesEsm)
+  const lost = PROFILE_SENTINELS.filter((x) => !code.includes(x))
+  if (lost.length) {
+    fail(`sentinel${lost.length > 1 ? 's' : ''} ${lost.map((x) => `"${x}"`).join(', ')} no longer appear in profiles.js — ` +
+         'update PROFILE_SENTINELS in scripts/verify-package.mjs')
+  }
+  const drawn = SENTINELS.filter((x) => code.includes(x))
+  if (drawn.length) fail(`drawing code leaked into profiles.js: ${drawn.map((x) => `"${x}"`).join(', ')}`)
+}
+
+/**
+ * The demo site computes its own profile data (src/components/profileData.js)
+ * to hand to the chart, as a host would. That is demo code: none of it may
+ * ship. The names are its exported functions; the positive control is the
+ * source file itself.
+ */
+const DEMO_SENTINELS = ['binBars', 'buildProfiles', 'splitSessions']
+const demoSource = await readFile(resolve(root, 'src/components/profileData.js'), 'utf8').catch(() => null)
+if (demoSource === null) fail('src/components/profileData.js is missing — update DEMO_SENTINELS in scripts/verify-package.mjs')
+else {
+  const lost = DEMO_SENTINELS.filter((x) => !demoSource.includes(x))
+  if (lost.length) fail(`${lost.join(', ')} no longer appear in src/components/profileData.js — update DEMO_SENTINELS`)
+  let leaks = 0
+  for (const f of (await readdir(out)).filter((n) => n.endsWith('.js')).sort().concat(
+    (await readdir(resolve(out, 'umd')).catch(() => [])).filter((n) => n.endsWith('.js')).sort().map((n) => `umd/${n}`))) {
+    const text = await read(f)
+    const hit = text === null ? [] : DEMO_SENTINELS.filter((x) => stripComments(text).includes(x))
+    if (hit.length) { leaks++; fail(`demo code leaked into the package: ${f} contains ${hit.join(', ')}`) }
+  }
+  if (!leaks) ok('no demo-site code in any shipped file')
+}
+
+const profilesUmd = await read(PROFILES_UMD)
+if (profilesUmd === null) fail(`${PROFILES_UMD} is missing — the CDN profiles build was not run (npm run build:umd)`)
+else {
+  if (profilesUmd.includes('EmberwickProfiles')) ok('profiles UMD defines the EmberwickProfiles global')
+  else fail('profiles UMD does not mention the EmberwickProfiles global')
+  if (profilesUmd.includes(CORE_STRING)) fail('profiles UMD bundles a second copy of the core')
+
+  const run = (ctx, text, filename) => vm.runInContext(text, ctx, { filename })
+  if (coreUmd !== null) {
+    try {
+      const ctx = vm.createContext({ console })
+      run(ctx, coreUmd, 'emberwick.umd.js')
+      run(ctx, profilesUmd, 'emberwick-profiles.umd.js')
+      const g = vm.runInContext('this', ctx)
+      if (g.EmberwickProfiles && typeof g.EmberwickProfiles.createVolumeProfile === 'function') {
+        ok('core UMD then profiles UMD defines EmberwickProfiles.createVolumeProfile')
+      } else fail('core UMD then profiles UMD ran, but EmberwickProfiles.createVolumeProfile is not a function')
+      // The pure half works with no DOM at all, straight off the global.
+      const va = g.EmberwickProfiles && g.EmberwickProfiles.computeValueArea([1, 4, 9, 5, 1], 100, 0.5)
+      if (!va || va.poc !== 101.25 || va.vah !== 102.5 || va.val !== 101) {
+        fail(`EmberwickProfiles.computeValueArea returned ${JSON.stringify(va)} from the UMD build`)
+      }
+    } catch (e) {
+      fail(`core UMD then profiles UMD threw: ${e && e.message}`)
+    }
+
+    try {
+      const coreModule = { exports: {} }
+      run(vm.createContext({ console, module: coreModule, exports: coreModule.exports }), coreUmd, 'emberwick.umd.js')
+      const requested = []
+      const mod = { exports: {} }
+      const require = (id) => { requested.push(id); if (id === 'emberwick') return coreModule.exports; throw new Error(`Cannot find module '${id}'`) }
+      run(vm.createContext({ console, module: mod, exports: mod.exports, require }), profilesUmd, 'emberwick-profiles.umd.js')
+      if (typeof mod.exports.createVolumeProfile === 'function' && requested.join() === 'emberwick') {
+        ok("profiles UMD under CommonJS require()s 'emberwick'")
+      } else fail(`profiles UMD under CommonJS required [${requested.join(', ')}] and exported no createVolumeProfile`)
+    } catch (e) {
+      fail(`profiles UMD under CommonJS threw: ${e && e.message}`)
+    }
+  }
+
+  // Alone, and after a core too old to have what profiles need: both must
+  // fail with the banner's message, not with a TypeError from inside.
+  const GUARD_MESSAGE = 'load emberwick.umd.js (0.13 or newer) before emberwick-profiles.umd.js'
+  for (const [label, globals] of [['without the core', {}], ['after a core older than 0.13', { Emberwick: { createChart() {}, Smoothed() {} } }]]) {
+    let thrown = null
+    try {
+      run(vm.createContext({ console, ...globals }), profilesUmd, 'emberwick-profiles.umd.js')
+    } catch (e) {
+      thrown = e
+    }
+    if (!thrown) fail(`profiles UMD loaded ${label} and did not throw — the load-order guard is missing`)
+    else if (thrown.name !== 'Error' || !String(thrown.message).includes(GUARD_MESSAGE)) {
+      fail(`profiles UMD ${label} threw ${thrown.name}: ${thrown.message} — expected the banner guard's "${GUARD_MESSAGE}"`)
+    } else ok(`profiles UMD ${label} throws the load-order message`)
+  }
+}
+
+if (profilesEsm !== null) {
+  try {
+    const pr = await import(pathToFileURL(resolve(out, 'profiles.js')).href)
+    if (pr.version === manifest.version) ok(`profiles.js exports version ${pr.version}`)
+    else {
+      fail(`version mismatch: manifest ${manifest.version}, profiles.js exports ${pr.version} ` +
+           '(bump src/profiles/index.js with src/chart/index.js and package.lib.json)')
+    }
+  } catch (e) {
+    fail(`profiles.js does not import in Node: ${e && e.message}`)
+  }
+}
+
 /**
  * (h) No new dependencies (boundary rule 6). Checked here, not in a test,
  * because the mutation harness copies only src/ and test/; a test reading a
