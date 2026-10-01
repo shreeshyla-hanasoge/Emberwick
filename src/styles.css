@@ -359,6 +359,35 @@ body.lock { overflow: hidden; }
 .seg button:hover { color: var(--text); }
 .seg button.on { color: var(--accent); background: rgba(38,166,154,0.12); }
 
+/* ---- profiles strip: the same strip as the drawings', with a slider ----- */
+.seg button:disabled { opacity: .4; cursor: default; }
+.seg button:disabled:hover { color: var(--muted); }
+.prange {
+  display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
+  font-size: 11.5px; color: var(--muted);
+}
+.prange input[type=range] { width: 92px; accent-color: var(--accent); }
+.prange b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; min-width: 34px; }
+.pcolor {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; color: var(--muted); cursor: pointer;
+}
+.pcolor input[type=color] {
+  width: 22px; height: 22px; padding: 0;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: transparent; cursor: pointer;
+}
+.pcolor input[type=color]:disabled { opacity: .4; cursor: default; }
+.pread {
+  /* A fixed slot, like .live: a readout that changes width would resize the
+     strip, and a resized strip resizes the chart under the pointer. */
+  width: 290px; flex-shrink: 0; overflow: hidden;
+  margin-left: auto;
+  font-size: 12px; font-variant-numeric: tabular-nums;
+  color: var(--muted); text-align: right;
+}
+.ev-hover { color: #ff9f43; }
+
 .btn:disabled { opacity: .4; cursor: default; }
 .btn:disabled:hover { color: var(--muted); border-color: var(--border); }
 .ibtn { gap: 4px; padding: 5px 9px; }
@@ -642,7 +671,7 @@ kbd {
 
 /* ---- phones ------------------------------------------------------------- */
 @media (max-width: 1100px) {
-  .live { display: none; }
+  .live, .pread { display: none; }
 }
 
 @media (max-width: 760px) {
