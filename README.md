@@ -1352,8 +1352,14 @@ replay dataset: **resolve anchors against this**), `replay`, `timeframeMs`,
 `barGen`, `panes`, `theme`, `fmt`, `width`, `height`, `pixelRatio`,
 `plotBottom`, `magnet`, `priceLines`, `animate` and `exporting`; and the
 methods `invalidate()`, `setCursor(css)`, `setHover(css)`, `setCrosshair(point)`,
-`release()`, `paneAt(y)`, `paneById(id)`, `formatPrice(price, pane?)` and
-`reportError(err, phase)`. Plugins must not read `_`-prefixed chart members;
+`release()`, `paneAt(y)`, `paneById(id)`, `timeToIndex(time)`,
+`indexToTime(index)`, `formatPrice(price, pane?)` and `reportError(err, phase)`.
+`timeToIndex` gives the **fractional** bar index of a time in ms, resolved
+against `source`: exact on a bar, linear across a session gap, extrapolated
+past either end, so `host.ts.x(host.timeToIndex(t))` is where that moment is
+drawn. The same pair is exported from the core as pure functions,
+`timeToIndex(bars, time, timeframeMs)` and `indexToTime(bars, index,
+timeframeMs)`. Plugins must not read `_`-prefixed chart members;
 everything they need is here or public on `host.chart`. The `panes` are the
 chart's live pane objects, so `visible` is rebuilt every frame: do not keep it.
 
@@ -1747,6 +1753,7 @@ import {
   easeOutCubic, easeInOutCubic,
   mulberry32,                   // seeded PRNG
   toNumber, DASH,               // the coercion and dash arrays inputs share
+  timeToIndex, indexToTime,     // time <-> fractional bar index
   version,
 } from 'emberwick'
 
@@ -1763,6 +1770,12 @@ import {
 `NaN`, never `0`) and `DASH` are exported so a plugin coerces input and names a
 dash the same way the core does: `'dashed'` then means one thing across price
 lines, series and drawings.
+
+`timeToIndex(bars, time, timeframeMs)` and `indexToTime(bars, index,
+timeframeMs)` map a time in ms to a **fractional** bar index and back: exact on
+a bar, linear across a gap, extrapolated past either end, and never clamped or
+snapped the way a marker is. `emberwick/drawings` re-exports the same two
+functions, as it always has.
 
 ---
 
