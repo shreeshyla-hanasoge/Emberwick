@@ -7,7 +7,7 @@
  */
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { installDom, makeContainer, makeBars, frame, settle, clearOps } from './dom-stub.mjs'
+import { installDom, makeContainer, makeBars, frame, settle, clearOps, withFixedClock } from './dom-stub.mjs'
 
 let restoreDom
 before(() => { restoreDom = installDom() })
@@ -266,7 +266,9 @@ test('the plugins layer is created on first attach, below the crosshair, and dro
 })
 
 test('attaching and detaching a no-op plugin paints exactly what a plain chart paints', () => {
-  const run = (withPlugin) => {
+  // The drag below is thrown: its inertia is distance over CLOCK time, so the
+  // two runs are only comparable under the same clock.
+  const run = (withPlugin) => withFixedClock(() => {
     const chart = charted()
     if (withPlugin) { const p = {}; chart.addPlugin(p); chart.removePlugin(p) }
     clearOps(chart)
@@ -277,7 +279,7 @@ test('attaching and detaching a no-op plugin paints exactly what a plain chart p
     const out = {}
     for (const n of ['base', 'main', 'overlay']) out[n] = JSON.stringify(chart.layers.canvas[n].ops)
     return out
-  }
+  })
   assert.deepEqual(run(true), run(false))
 })
 
