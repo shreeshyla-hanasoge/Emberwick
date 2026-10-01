@@ -1350,8 +1350,8 @@ own test, so you agree with its gestures) and the pane under it.
 `chart`, `ts`, `bars` (under replay, the revealed prefix), `source` (the whole
 replay dataset: **resolve anchors against this**), `replay`, `timeframeMs`,
 `barGen`, `panes`, `theme`, `fmt`, `width`, `height`, `pixelRatio`,
-`plotBottom`, `magnet`, `priceLines`, `animate` and `exporting`; and the
-methods `invalidate()`, `setCursor(css)`, `setHover(css)`,
+`plotBottom`, `magnet`, `volumeRatio`, `priceLines`, `animate` and `exporting`;
+and the methods `invalidate()`, `setCursor(css)`, `setHover(css)`,
 `setCrosshair(point)`, `release()`, `paneAt(y)`, `paneById(id)`,
 `timeToIndex(time)`, `indexToTime(index)`, `formatPrice(price, pane?)`,
 `drawPriceTag(ctx, price, opts?)` and `reportError(err, phase)`. Plugins must

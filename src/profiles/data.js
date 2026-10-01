@@ -76,8 +76,10 @@ export function normalizeSession(raw, step, where = 'session') {
     total: toNumber(raw.total) > 0 ? toNumber(raw.total) : sum,
     poc: null, pocBin: -1, vah: null, val: null, vaFrom: -1, vaTo: -1,
     developing: !!raw.developing,
-    // Resolved against the bar array by the controller (NaN: not yet).
-    u0: NaN, u1: NaN,
+    // Resolved against the bar array by the controller (NaN: not yet), then
+    // rewritten in place every frame. Declared here so a session never
+    // changes shape after it is built.
+    u0: NaN, u1: NaN, on: false, vis: false, xl: 0, xr: 0, touch: -1, scan: 0,
   }
   if (!(sum > 0)) return s            // nothing traded: bars, POC and value area all absent
 

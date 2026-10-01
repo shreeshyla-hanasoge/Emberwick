@@ -78,6 +78,12 @@ export const MUTANTS = [
     replace: '      if (!layer) return\n',
   },
   {
+    name: 'host.volumeRatio answers the default whatever the chart was given',
+    file: CHART,
+    find: '      get volumeRatio() { return chart.options.volumeRatio },',
+    replace: '      get volumeRatio() { return 0.18 },',
+  },
+  {
     name: "A below plugin's hit hides the marker painted above it",
     file: CHART,
     find: '    const over = this._pluginHit && !this._pluginHit.rec.below',
