@@ -13,6 +13,14 @@ import { normalizeData, normalizeSession, upsert } from './data.js'
 import { DEFAULTS, mergeOptions } from './options.js'
 import { profileColors } from './theme.js'
 import { spanLeft, spanRight, barLength, binAt, drawBins, drawBin, firstTouch } from './render.js'
+import { valueAreaBins } from './valueArea.js'
+
+/**
+ * Past this many bins the visible profile is not built. Sessions that share a
+ * step but sit millions of steps apart are bad data, not a profile, and one
+ * array sized to span them would be the only large allocation in the entry.
+ */
+const MAX_AGG_BINS = 1e6
 
 const fail = (msg) => { throw new Error(`emberwick/profiles: ${msg}`) }
 
@@ -58,6 +66,19 @@ export class VolumeProfile {
     this._capText = ''
     this._capFont = ''
     this._capW = 0
+    /**
+     * The visible-range profile: the sum of the sessions on screen, shaped
+     * like a session so the same renderer and hit test draw it. `a`, `b`,
+     * `count` and `rev` are what it was built from; while they hold, a frame
+     * only re-projects it.
+     */
+    this._agg = {
+      raw: null, lo: 0, bins: new Float64Array(0), n: 0, max: 0, total: 0,
+      poc: null, pocBin: -1, vah: null, val: null, vaFrom: -1, vaTo: -1,
+      a: -1, b: -1, count: 0, rev: -1,
+    }
+    /** How many times the visible profile was summed. Read by tests: a zoom must not move it. */
+    this._aggBuilds = 0
 
     // ---- hover: the bin under the pointer, as (session, bin index) ----
     this._hasPtr = false
@@ -253,9 +274,41 @@ export class VolumeProfile {
       }
     }
 
+    // The visible-range profile, after the sessions so it sits on top of them.
+    const g = o.mode !== 'session' ? this._aggregate() : null
+    const gx = o.side === 'left' ? r.x : right
+    const gdir = o.side === 'left' ? 1 : -1
+    if (g && g.max > 0) {
+      drawBins(ctx, ps, g, d.step, gx, gdir, o.width * r.w, top, bottom, colors, o.valueArea, st)
+      if (o.valueArea) {
+        const yh = Math.round(ps.y(g.vah)) + 0.5
+        const yl = Math.round(ps.y(g.val)) + 0.5
+        ctx.strokeStyle = colors.vaLine
+        ctx.lineWidth = 1
+        ctx.setLineDash(DASH.dashed)
+        ctx.beginPath()
+        ctx.moveTo(r.x, yh)
+        ctx.lineTo(right, yh)
+        ctx.moveTo(r.x, yl)
+        ctx.lineTo(right, yl)
+        ctx.stroke()
+        ctx.setLineDash(DASH.solid)
+      }
+      if (o.poc) {
+        const y = Math.round(ps.y(g.poc))
+        ctx.strokeStyle = colors.poc
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(r.x, y)
+        ctx.lineTo(right, y)
+        ctx.stroke()
+      }
+    }
+
     if (!info.exporting && this._hovS) {
       const s = this._hovS
-      if (s.vis) drawBin(ctx, ps, s, d.step, this._hovI, Math.round(s.xl), 1, o.width * (s.xr - s.xl), colors.hover)
+      if (s === g) drawBin(ctx, ps, g, d.step, this._hovI, gx, gdir, o.width * r.w, colors.hover)
+      else if (s.vis) drawBin(ctx, ps, s, d.step, this._hovI, Math.round(s.xl), 1, o.width * (s.xr - s.xl), colors.hover)
     }
     if (o.label && d.source) this._caption(ctx, host, r, d.source)
     ctx.restore()
@@ -269,6 +322,7 @@ export class VolumeProfile {
       }
       if (last && last.poc !== null) this._tags(ctx, host, pane, last, colors)
     }
+    if (o.tags && g && g.max > 0) this._tags(ctx, host, pane, g, colors)
   }
 
   /** After the chart's own state events: the safe place to tell listeners. */
@@ -397,6 +451,88 @@ export class VolumeProfile {
   }
 
   /**
+   * Whether `s` is part of the visible-range profile: loaded, finished (under
+   * replay), and overlapping the bar indices on screen.
+   */
+  _summed(s) {
+    return s.on && s.end < this._cut && s.u1 >= this._from && s.u0 <= this._to
+  }
+
+  /**
+   * The visible-range profile: every shown session that overlaps the bars on
+   * screen, summed bin by bin.
+   *
+   * The sessions share one `step`, so each is laid onto a common grid at
+   * `round((s.lo - lowest lo) / step)`. It sums WHOLE sessions: a session
+   * half on screen contributes all of its volume, because the host sent the
+   * session's total per bin, not a bin per bar.
+   *
+   * It is rebuilt only when the set of overlapping sessions changes or the
+   * data does. A zoom, a price-scale ease or a pan that keeps the same
+   * sessions on screen leaves it alone, and the frame only re-projects.
+   */
+  _aggregate() {
+    const g = this._agg
+    const sessions = this._data.sessions
+    const step = this._data.step
+    let a = -1
+    let b = -1
+    let count = 0
+    for (let k = 0; k < sessions.length; k++) {
+      if (!this._summed(sessions[k])) continue
+      if (a < 0) a = k
+      b = k
+      count++
+    }
+    if (a === g.a && b === g.b && count === g.count && g.rev === this._rev) return g
+    g.a = a
+    g.b = b
+    g.count = count
+    g.rev = this._rev
+    g.n = 0
+    g.max = 0
+    g.total = 0
+    g.poc = g.vah = g.val = null
+    g.pocBin = g.vaFrom = g.vaTo = -1
+    this._aggBuilds++
+
+    let lo = Infinity
+    let hi = -Infinity
+    for (let k = a; k >= 0 && k <= b; k++) {
+      const s = sessions[k]
+      if (!s.n || !this._summed(s)) continue
+      if (s.lo < lo) lo = s.lo
+      if (s.lo + s.n * step > hi) hi = s.lo + s.n * step
+    }
+    const n = Math.round((hi - lo) / step)
+    if (!(n > 0 && n <= MAX_AGG_BINS)) return g
+    // Grown when needed and kept: the sum is not a per-frame allocation.
+    if (g.bins.length < n) g.bins = new Float64Array(n)
+    else g.bins.fill(0, 0, n)
+    const bins = g.bins
+    for (let k = a; k <= b; k++) {
+      const s = sessions[k]
+      if (!s.n || !this._summed(s)) continue
+      const off = Math.round((s.lo - lo) / step)
+      for (let i = 0; i < s.n; i++) bins[off + i] += s.bins[i]
+      g.total += s.total
+    }
+    for (let i = 0; i < n; i++) if (bins[i] > g.max) g.max = bins[i]
+    g.lo = lo
+    g.n = n
+    const va = valueAreaBins(g.bins.length === n ? bins : bins.subarray(0, n))
+    if (va) {
+      g.pocBin = va.poc
+      g.vaFrom = va.from
+      g.vaTo = va.to
+      g.poc = lo + (va.poc + 0.5) * step
+      g.vah = lo + (va.to + 1) * step
+      g.val = lo + va.from * step
+    }
+    return g
+  }
+
+  /**
    * Where the profile's clip ends: the top of the volume strip when the chart
    * draws one, else the bottom of the pane.
    *
@@ -516,7 +652,7 @@ export class VolumeProfile {
     this._hitI = -1
     const host = this._host
     const d = this._data
-    if (!host || !d.sessions.length || this._opts.mode === 'visible') return
+    if (!host || !d.sessions.length) return
     const pane = host.paneById('price')
     if (!pane || !pane.ps.primed) return
     const r = pane.rect
@@ -525,6 +661,22 @@ export class VolumeProfile {
     if (y > this._clipBottom(host, r)) return
     const price = pane.ps.price(y)
     const ts = host.ts
+    const o = this._opts
+    // The visible profile first: it is drawn last, so it is what the pointer is on.
+    if (o.mode !== 'session') {
+      const g = this._aggregate()
+      const i = g.max > 0 ? binAt(price, g.lo, d.step, g.n) : -1
+      if (i >= 0 && g.bins[i] > 0) {
+        const len = barLength(g.bins[i], g.max, o.width * r.w)
+        if (o.side === 'left' ? x <= r.x + len : x >= r.x + r.w - len) {
+          this._hitS = g
+          this._hitI = i
+          this._hovPrice = price
+          return
+        }
+      }
+      if (o.mode === 'visible') return
+    }
     // Newest first: where two sessions' spans meet, the later one is on top.
     for (let k = d.sessions.length - 1; k >= 0; k--) {
       const s = d.sessions[k]

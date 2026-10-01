@@ -366,12 +366,6 @@ export const MUTANTS = [
     replace: '    if (!this._host || !this._hasPtr || !this._retest) return',
   },
   {
-    name: 'A session bin is reported in visible mode',
-    file: VP,
-    find: "    if (!host || !d.sessions.length || this._opts.mode === 'visible') return",
-    replace: '    if (!host || !d.sessions.length) return',
-  },
-  {
     name: 'A point in the volume strip, under the clip, hits a bin',
     file: VP,
     find: '    if (y > this._clipBottom(host, r)) return\n',
