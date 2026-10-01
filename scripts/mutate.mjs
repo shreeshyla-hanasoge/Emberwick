@@ -44,7 +44,19 @@ if (!testFiles.length) {
  * which the INVALID verdict below depends on.
  */
 const runSuite = (cwd) => {
-  const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...testFiles], { cwd, encoding: 'utf8' })
+  // maxBuffer: spawnSync keeps 1 MB of output by default and truncates the
+  // rest without a word. A mutant in a function everything goes through (the
+  // one coercion, say) fails hundreds of tests at once, and their TAP blocks
+  // ran to 1.8 MB once the suite passed a thousand tests: the summary line was
+  // cut off, and the guard below read a perfectly good catch as "the runner
+  // failed to start" and aborted the whole run.
+  const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...testFiles], {
+    cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024,
+  })
+  if (r.error) {
+    console.error(`\nThe test runner could not be run: ${r.error.message}`)
+    process.exit(1)
+  }
   // Guard against the suite failing to RUN: a crashed runner is not a catch.
   if (!/[#ℹ] tests \d+/.test(r.stdout)) {
     console.error('\nThe test runner did not report a summary — it failed to start:')
