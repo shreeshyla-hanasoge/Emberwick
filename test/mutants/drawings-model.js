@@ -7,25 +7,27 @@
  * deleting it.
  */
 const TIME = 'src/drawings/model/time.js'
+/** timeToIndex and indexToTime moved here in 0.13; the three mutants that revert them moved with it. */
+const CORE_TIME = 'src/chart/core/time.js'
 const SCHEMA = 'src/drawings/model/schema.js'
 const HISTORY = 'src/drawings/model/history.js'
 
 export const MUTANTS = [
   {
     name: 'A future time clamps onto the newest bar',
-    file: TIME,
+    file: CORE_TIME,
     find: '  if (t >= last) return n - 1 + (t - last) / step',
     replace: '  if (t >= last) return n - 1',
   },
   {
     name: 'A past time clamps onto the oldest bar',
-    file: TIME,
+    file: CORE_TIME,
     find: '  if (t <= first) return (t - first) / step',
     replace: '  if (t <= first) return 0',
   },
   {
     name: 'A time between bars snaps to the nearest',
-    file: TIME,
+    file: CORE_TIME,
     find: '  return span > 0 ? k - 1 + (t - a) / span : k - 1',
     replace: '  return t - a < +bars[k].time - t ? k - 1 : k',
   },

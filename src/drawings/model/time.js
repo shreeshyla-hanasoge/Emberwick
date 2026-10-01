@@ -3,16 +3,24 @@
  *
  * A drawing is stored against time (so it survives reloads, prepends and a
  * timeframe switch) but drawn against the bar index the TimeScale lays out.
- * These five functions are the whole bridge, and they are pure: no scale, no
+ * These functions are the whole bridge, and they are pure: no scale, no
  * chart, just a bar array sorted ascending by time.
+ *
+ * timeToIndex and indexToTime moved into the core (src/chart/core/time.js) so
+ * every plugin maps time the same way; they are re-exported here because this
+ * module and the drawings entry have always exported them. What stays is the
+ * drawing-specific half: a stored point carries a bar-count offset outside
+ * the data.
  *
  * The code below is prescribed line for line by the drawings spec (§3.3); the
  * mutation manifest anchors on these exact lines, so reformatting one silently
  * drops the test coverage it measures.
  */
-import { toNumber } from '../../chart/index.js'
+import { timeToIndex, indexToTime } from '../../chart/index.js'
 
-/** First index whose time >= t (n when none). A private copy of the core's search: deep-importing it would split the core bundle. */
+export { timeToIndex, indexToTime }
+
+/** First index whose time >= t (n when none). The same search the core's timeToIndex runs, kept for callers that need the insertion point itself. */
 export function lowerBoundTime(bars, t) {
   let lo = 0
   let hi = bars.length
@@ -22,41 +30,6 @@ export function lowerBoundTime(bars, t) {
     else hi = mid
   }
   return lo
-}
-
-/**
- * Fractional bar index of `time`. On a bar: exactly that index. Between two bars
- * (a session gap, or a 1m time on 5m data): linear between them, monotonic.
- * Outside the data: extrapolated at one `tf` per bar. Deliberately NOT
- * nearestIndex, which clamps and snaps.
- */
-export function timeToIndex(bars, time, tf) {
-  const n = bars.length
-  const t = toNumber(time)
-  if (!n || Number.isNaN(t)) return NaN
-  const step = tf > 0 ? tf : 60000
-  const first = +bars[0].time
-  const last = +bars[n - 1].time
-  if (t >= last) return n - 1 + (t - last) / step
-  if (t <= first) return (t - first) / step
-  const k = lowerBoundTime(bars, t)
-  if (+bars[k].time === t) return k
-  const a = +bars[k - 1].time
-  const span = +bars[k].time - a
-  return span > 0 ? k - 1 + (t - a) / span : k - 1
-}
-
-/** Exact inverse inside the data; integer u -> bars[u].time. null with no bars or a non-finite u. */
-export function indexToTime(bars, u, tf) {
-  const n = bars.length
-  if (!n || !Number.isFinite(u)) return null
-  const step = tf > 0 ? tf : 60000
-  if (u <= 0) return Math.round(+bars[0].time + u * step)
-  if (u >= n - 1) return Math.round(+bars[n - 1].time + (u - (n - 1)) * step)
-  const i = Math.floor(u)
-  const f = u - i
-  const a = +bars[i].time
-  return f === 0 ? a : Math.round(a + f * (+bars[i + 1].time - a))
 }
 
 /** A stored point's fractional index against `bars` at the current timeframe. */

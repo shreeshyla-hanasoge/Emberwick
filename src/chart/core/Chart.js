@@ -1,4 +1,5 @@
 import { createTimeFormatter, toNumber, priceTicks, decimalsFor } from './formatters.js'
+import { timeToIndex, indexToTime } from './time.js'
 import { Layers } from './Layers.js'
 import { Loop } from './Loop.js'
 import { TimeScale } from './TimeScale.js'
@@ -2043,11 +2044,12 @@ export class Chart {
 
   _makeHost(rec) {
     const chart = this
+    const source = () => (chart._replay ? chart._replay.source : chart.bars)
     return {
       chart,
       get ts() { return chart.ts },
       get bars() { return chart.bars },
-      get source() { return chart._replay ? chart._replay.source : chart.bars },
+      get source() { return source() },
       get replay() { return chart._replay },
       get timeframeMs() { return chart.ts.timeframeMs },
       get barGen() { return chart._barGen },
@@ -2080,6 +2082,11 @@ export class Chart {
       release() { if (chart._owner && chart._owner.rec === rec) chart._releaseOwner() },
       paneAt(y) { return paneAtY(chart._panes, y) },
       paneById(id) { return chart._paneById.get(String(id)) || null },
+      // Against `source`, never `bars`: under replay the revealed prefix ends
+      // at the cursor, and an anchor past it would extrapolate at one
+      // timeframe per bar instead of landing on the bar it names.
+      timeToIndex(time) { return timeToIndex(source(), time, chart.ts.timeframeMs) },
+      indexToTime(u) { return indexToTime(source(), u, chart.ts.timeframeMs) },
       formatPrice(price, pane) {
         const pn = pane || chart._panes[0]
         const { step } = priceTicks(pn.ps.lo, pn.ps.hi, Math.max(2, Math.floor(pn.rect.h / 58)))

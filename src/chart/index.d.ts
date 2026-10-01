@@ -848,6 +848,14 @@ export interface PluginHost {
   release(): void
   paneAt(y: number): PaneView | null
   paneById(id: string): PaneView | null
+  /**
+   * Fractional bar index of a time (ms), resolved against `source` at
+   * `timeframeMs`: an exact index on a bar, linear across a gap, extrapolated
+   * outside the data. Feed it to `ts.x()`. NaN with no bars.
+   */
+  timeToIndex(time: number): number
+  /** The inverse: the time (ms) at a fractional bar index, or null with no bars. */
+  indexToTime(index: number): number | null
   /** With the decimals the pane's own axis uses (the price pane by default). */
   formatPrice(price: number, pane?: PaneView): string
   /** Emits the chart's 'error' event, phase `plugin <phase>`. */
@@ -927,6 +935,17 @@ export declare function mulberry32(seed: number): () => number
  * booleans, '' and everything else are NaN, never 0.
  */
 export declare function toNumber(v: unknown): number
+
+/**
+ * Fractional bar index of `time` (ms) in `bars`, which must ascend by time.
+ * On a bar: exactly its index. Between two bars (a session gap, or a 1-minute
+ * time on 5-minute bars): linear between them. Outside the data: extrapolated
+ * at one `timeframeMs` per bar (default 60000). NaN with no bars or a
+ * non-numeric time. Unlike a marker's resolution it never clamps or snaps.
+ */
+export declare function timeToIndex(bars: readonly Bar[], time: number, timeframeMs?: number): number
+/** The inverse of timeToIndex; null with no bars or a non-finite index. */
+export declare function indexToTime(bars: readonly Bar[], index: number, timeframeMs?: number): number | null
 
 /** Canvas dash arrays for each LineStyle. */
 export declare const DASH: { readonly solid: number[]; readonly dashed: number[]; readonly dotted: number[] }
