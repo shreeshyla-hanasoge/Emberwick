@@ -442,7 +442,7 @@ test('normalizeDrawings is the pure public wrapper: drawings.length === loaded +
   assert.deepEqual(r.drawings[1], { type: 'future', id: 'f', z: 9, keep: true })
   assert.equal(normalizeDrawings([tl(1, 1, 2, 2)], [horizontalLine]).report.carried.length, 1, 'with a tool list of its own')
   assert.equal(D.SCHEMA_VERSION, 1)
-  assert.equal(D.version, '0.13.0')
+  assert.equal(D.version, '0.14.0')
   assert.equal(D.STANDARD_TOOLS.length, 9)
   assert.equal(Object.keys(D.TOOL_PRESETS).length, 14)
   assert.equal(D.timeToIndex(bars(10), t(3), MIN), 3)

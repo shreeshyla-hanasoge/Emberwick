@@ -76,6 +76,31 @@ export function fmtDateTime(ms) {
   return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`
 }
 
+/**
+ * Time left until a candle closes, as TradingView prints it beside the last
+ * price. The SHAPE is chosen by the timeframe, not by what is left, so the
+ * tag keeps one width while it counts: an hourly bar reads 0:59:59 then
+ * 0:00:01, never 59:59 then 0:01. Seconds are rounded UP, so a bar shows
+ * 00:01 until the moment it closes and never idles on 00:00.
+ *
+ *   tf < 1h   MM:SS
+ *   tf < 1d   H:MM:SS
+ *   tf >= 1d  Dd HH:MM:SS
+ *
+ * @param {number} remainingMs ms until close; clamped at zero
+ * @param {number} tfMs bar duration in ms
+ */
+export function fmtCountdown(remainingMs, tfMs) {
+  const total = Math.max(0, Math.ceil(remainingMs / 1000))
+  const s = total % 60
+  const m = Math.floor(total / 60) % 60
+  const h = Math.floor(total / 3600)
+  if (tfMs < 36e5) return `${p2(m + (h * 60))}:${p2(s)}`
+  if (tfMs < 864e5) return `${h}:${p2(m)}:${p2(s)}`
+  const d = Math.floor(h / 24)
+  return `${d}d ${p2(h % 24)}:${p2(m)}:${p2(s)}`
+}
+
 export function fmtVolume(v) {
   if (!isFinite(v)) return '—'
   if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B'

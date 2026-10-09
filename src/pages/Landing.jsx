@@ -375,6 +375,98 @@ function VersionTag({ v }) {
   )
 }
 
+/* ------------------------------------------------------------ countdown -- */
+/**
+ * One slow synthetic market: a 1-minute candle forms in ten real seconds, so
+ * the countdown in the last-price tag is seen ticking rather than blurring
+ * past. RandomFeed implements now(), the feed's own clock, which is what
+ * keeps the tag honest at 6x; the feed is paused off screen, and a paused
+ * feed stops its clock, so the tag holds rather than counting into stale.
+ */
+function CountdownChart() {
+  const hostRef = useRef(null)
+  const wrapRef = useRef(null)
+  const chartRef = useRef(null)
+  const feedRef = useRef(null)
+  const [ready, setReady] = useState(false)
+  const [on, setOn] = useState(true)
+
+  useEffect(() => {
+    let disposed = false
+    const chart = createChart(hostRef.current, {
+      theme: { ...defaultTheme, background: '#0a0d15' },
+      initialBars: 400,
+      timeScale: { spacing: 9, rightOffset: 8 },
+      priceScale: { marginTop: 0.18, marginBottom: 0.16 },
+    })
+    chartRef.current = chart
+
+    const feed = new RandomFeed({
+      symbol: 'EMBR',
+      timeframe: 60000,
+      seed: 20261009,
+      start: 128.4,
+      ticksPerSecond: 8,
+      speed: 6, // a one-minute candle every ten seconds
+    })
+    feedRef.current = feed
+
+    let io = null
+    if (typeof IntersectionObserver !== 'undefined') {
+      io = new IntersectionObserver(([e]) => feed.setPaused(!e.isIntersecting))
+      io.observe(wrapRef.current)
+    }
+
+    chart.setFeed(feed).then(() => {
+      if (!disposed) setReady(true)
+    })
+
+    return () => {
+      disposed = true
+      if (io) io.disconnect()
+      feed.destroy()
+      chart.destroy()
+      chartRef.current = null
+      feedRef.current = null
+    }
+  }, [])
+
+  const toggle = () => {
+    setOn(!on)
+    chartRef.current?.setCountdown(!on)
+  }
+
+  return (
+    <div className="lp-annochart" ref={wrapRef}>
+      <div className="lp-chartwrap">
+        <div className="lp-chartbar">
+          <span className="lp-dot lp-dot-a" />
+          <span className="lp-dot lp-dot-b" />
+          <span className="lp-dot lp-dot-c" />
+          <span className="lp-chartbar-title">EMBR · 1m · a candle every ten seconds</span>
+        </div>
+        <div className="lp-chart lp-chart-sm" ref={hostRef}>
+          {!ready && <div className="lp-chart-loading">loading the tape…</div>}
+        </div>
+      </div>
+
+      <div className="lp-serieslegend">
+        <button
+          type="button"
+          className={`lp-serieschip ${on ? 'is-on' : ''}`}
+          onClick={toggle}
+        >
+          <span className="lp-serieswatch" style={{ background: defaultTheme.up }} />
+          countdown
+        </button>
+        <span className="lp-serieshint">
+          watch the tag on the price axis — switch it off and the tag is the one row it was
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function SeriesChart() {
   const hostRef = useRef(null)
   const chartRef = useRef(null)
@@ -478,7 +570,7 @@ function SeriesChart() {
  * instruments never trade through.
  */
 /** The release whose tag is accented. Everything else reads "since". */
-const CURRENT_RELEASE = '0.13.0'
+const CURRENT_RELEASE = '0.14.0'
 
 const ZONES = [
   { id: 'Asia/Kolkata', label: 'Mumbai' },
@@ -875,6 +967,10 @@ const SHAPES = [
 
 const FEATURES = [
   {
+    t: 'Candle countdown',
+    d: 'The last-price tag counts down to the forming candle\u2019s close, the way TradingView\u2019s does: price above, time left below, one box on the line. Hidden when the data is stale, on the replay\u2019s own clock under replay, and one repaint a second while it counts \u2014 none while it does not.',
+  },
+  {
     t: 'Volume profiles',
     d: 'Session and visible-range profiles with the point of control and the value area, drawn under the candles from data you supply. Bins stay fixed in price while the axis eases, the forming session updates live, and replay hides a session until it has finished. A separate entry, absent until you import it.',
   },
@@ -1106,7 +1202,7 @@ export default function Landing() {
       {/* ---- hero ---- */}
       <section className="lp-hero">
         <span className="lp-pill">
-          <span className="lp-pulse" /> new in v{CURRENT_RELEASE} — volume profiles
+          <span className="lp-pulse" /> new in v{CURRENT_RELEASE} — candle countdown
         </span>
         <h1>
           Candlestick charts that
@@ -1163,6 +1259,57 @@ export default function Landing() {
       {/* Feature sections run NEWEST FIRST, so the version tags descend as you
           scroll and the current release is the first one you meet. Only the
           newest carries an accent tag; see VersionTag. */}
+      {/* ---- candle countdown ---- */}
+      <section className="lp-section" id="countdown">
+        <VersionTag v="0.14.0" />
+        <h2>See when the candle closes</h2>
+        <p className="lp-lede">
+          The last-price tag counts down to the forming candle&rsquo;s close,
+          the way TradingView&rsquo;s does: one box centred on the price line,
+          the price in its upper half and the time left in its lower half. The
+          shape follows the timeframe, so the tag keeps one width while it
+          counts, and seconds round up, so a bar reads 00:01 until the moment it
+          closes.
+        </p>
+
+        <CountdownChart />
+
+        <div className="lp-annofacts">
+          <div className="lp-annofact">
+            <h3>Hidden when there is nothing honest to show</h3>
+            <p>
+              History alone, a feed that stopped, a market that closed: each
+              would count below zero. The tag shows <code>00:00</code> for one
+              bar after the close, since a feed&rsquo;s append is usually a
+              beat late, and nothing after that. A clock a few seconds behind
+              the bars clamps to a full bar rather than blinking the tag off at
+              every open.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>Whose clock</h3>
+            <p>
+              <code>Date.now()</code>, unless the bars are not on wall-clock
+              time. Then pass <code>clock</code> to the chart, or give the feed
+              a <code>now()</code>, in ms on the bars&rsquo; clock: bars stamped
+              in exchange-local time, a backtest tape, or this page&rsquo;s
+              synthetic market at six times speed. Under replay it is the
+              replay&rsquo;s own clock, the fraction of the bar that has played.
+            </p>
+          </div>
+          <div className="lp-annofact">
+            <h3>One repaint a second, only while counting</h3>
+            <p>
+              A frame that draws a countdown arms a single timer for the next
+              whole second of its clock. A chart without one, hidden or
+              switched off with <code>setCountdown(false)</code>, stays at zero
+              CPU as before. The tag is the chart&rsquo;s own, so it still sits
+              above every plugin&rsquo;s.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* ---- volume profiles ---- */}
       <section className="lp-section" id="profiles">
         <VersionTag v="0.13.0" />

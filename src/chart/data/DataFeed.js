@@ -17,6 +17,15 @@
  *       handler({ type: 'update'|'append', bar }) where
  *         'update' = the forming candle changed (animates)
  *         'append' = a new candle opened (previous one is now closed)
+ *
+ * Optional:
+ *   prime(lastBar)
+ *       Called once after history loads, to seed the forming candle.
+ *   now() -> number
+ *       The current time in ms ON THE BARS' CLOCK, for the candle-close
+ *       countdown. Implement it when wall-clock time is not the bars' time:
+ *       a synthetic or accelerated feed, an exchange with a known offset.
+ *       Absent, the chart uses options.clock, then Date.now().
  */
 export class DataFeed {
   constructor({ symbol = 'DEMO', timeframe = 60000 } = {}) {

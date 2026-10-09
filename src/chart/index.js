@@ -19,7 +19,7 @@ export { Inertia } from './motion/Inertia.js'
 export { LiveCandle } from './motion/LiveCandle.js'
 export { Replay, MIN_SPEED, MAX_SPEED } from './replay/Replay.js'
 /** The one coercion every Emberwick input goes through — shared so plugins agree with the core. */
-export { toNumber } from './core/formatters.js'
+export { toNumber, fmtCountdown } from './core/formatters.js'
 /** So 'dashed' means one thing across price lines, series and drawings. */
 export { DASH } from './render/style.js'
 /** Whether a theme background is light: how a plugin picks colours that read on it. */
@@ -34,5 +34,5 @@ export function createChart(container, options) {
   return new Chart(container, options)
 }
 
-export const version = '0.13.0'
+export const version = '0.14.0'
 

@@ -1,4 +1,4 @@
-import { createTimeFormatter, toNumber, priceTicks, decimalsFor } from './formatters.js'
+import { createTimeFormatter, toNumber, priceTicks, decimalsFor, fmtCountdown } from './formatters.js'
 import { timeToIndex, indexToTime } from './time.js'
 import { Layers } from './Layers.js'
 import { Loop } from './Loop.js'
@@ -148,6 +148,12 @@ export class Chart {
       touchCrosshair: true,
       /** How long a finger must rest before a drag scrubs instead of pans. */
       touchCrosshairDelay: 350,
+      /**
+       * Count down to the forming candle's close in the last-price tag, the
+       * way TradingView does. Reads options.clock, then the feed's now(),
+       * then Date.now(); hidden when the data is stale. See _countdown.
+       */
+      countdown: true,
       ...options,
     }
 
@@ -158,6 +164,12 @@ export class Chart {
     this._exhausted = false
     this._historyErrors = 0
     this._replay = null
+    /**
+     * Repaint due at the next whole second of the countdown. Only armed by a
+     * frame that drew one, so an idle chart without a countdown stays at zero
+     * CPU; cleared on destroy. See _armCountdown.
+     */
+    this._countdownTimer = null
     // Every async feed read is stamped with the generation current when it
     // STARTED. setFeed/detachFeed/destroy bump the counter, so a slow earlier
     // request that resolves second recognises itself as stale and drops its
@@ -1727,6 +1739,7 @@ export class Chart {
     // loop but NEVER folded into `animating`, or a hover fade would repaint
     // the grid and every candle.
     const pluginsBusy = this._plugins.length ? this._framePlugins(dirty, dt, redrawAll) : false
+    const countdown = this._countdown()
     const state = {
       theme: this.theme,
       ts: this.ts,
@@ -1737,6 +1750,7 @@ export class Chart {
       height: this.layers.height,
       live: liveVisible,
       volumeRatio: this.options.volumeRatio,
+      countdown,
       cursor: this.cursor,
       magnet: this.options.magnet,
       priceLines: this.priceLines,
@@ -1815,7 +1829,75 @@ export class Chart {
     }
     if (this._plugins.length) for (const rec of this._plugins) this._call(rec, 'afterFrame')
 
+    // Replay keeps the loop awake itself while playing, and its countdown
+    // holds still while paused; only a clock-driven countdown needs a wake-up
+    // at the next second. Armed after drawing, so a thrown frame arms nothing.
+    if (countdown !== null && !this._replay) this._armCountdown()
+
     return animating || pluginsBusy
+  }
+
+  // ------------------------------------------------------------- countdown --
+  /** Now, in ms on the bars' clock: options.clock, else the feed's now(), else Date.now(). */
+  _now() {
+    const clock = this.options.clock
+    if (typeof clock === 'function') return +clock()
+    if (this.feed && typeof this.feed.now === 'function') return +this.feed.now()
+    return Date.now()
+  }
+
+  /**
+   * Text for the countdown row of the last-price tag, or null when there is
+   * nothing honest to show. The rule, in bar lengths from the last bar's
+   * open, with `now` on the bars' clock:
+   *
+   *   now < open - tf         clock a whole bar behind the data: hidden
+   *   open - tf <= now < open clamped to a full bar (a few seconds of skew
+   *                           must not blink the tag at every open)
+   *   open <= now < close     the countdown proper
+   *   close <= now < close+tf 00:00: the bar has closed and the next has not
+   *                           arrived — a feed is usually a beat late
+   *   now >= close + tf       stale: history, a stopped feed, a closed
+   *                           market. Hidden, as TradingView hides it.
+   *
+   * Under replay the clock is the replay's own: the fraction of the current
+   * bar that has played. At 1x a 5m bar counts 5:00 to 0:00 in one second.
+   */
+  _countdown() {
+    if (this.options.countdown === false || !this.bars.length) return null
+    const tf = this.ts.timeframeMs
+    if (!(tf > 0)) return null
+    let remaining
+    if (this._replay) {
+      remaining = tf * (1 - this._replay.phase)
+    } else {
+      const open = toNumber(this.bars[this.bars.length - 1].time)
+      const now = this._now()
+      if (Number.isNaN(open) || !Number.isFinite(now)) return null
+      remaining = open + tf - now
+      if (remaining > 2 * tf || remaining <= -tf) return null
+      remaining = Math.min(tf, Math.max(0, remaining))
+    }
+    return fmtCountdown(remaining, tf)
+  }
+
+  /** One repaint at the next whole second of the clock; at most one pending. */
+  _armCountdown() {
+    if (this._countdownTimer !== null || this._destroyed) return
+    const now = this._now()
+    const phase = Number.isFinite(now) ? ((now % 1000) + 1000) % 1000 : 0
+    const timer = setTimeout(() => {
+      this._countdownTimer = null
+      if (!this._destroyed) this.loop.invalidate('main')
+    }, 1000 - phase + 1)
+    // Node hands back an object that would otherwise hold a test process open.
+    if (timer && typeof timer.unref === 'function') timer.unref()
+    this._countdownTimer = timer
+  }
+
+  setCountdown(on) {
+    this.options.countdown = !!on
+    this.loop.invalidate('main')
   }
 
   // ------------------------------------------------------------------- api --
@@ -2261,6 +2343,10 @@ export class Chart {
     if (this._holdTimer !== null) {
       clearTimeout(this._holdTimer)
       this._holdTimer = null
+    }
+    if (this._countdownTimer !== null) {
+      clearTimeout(this._countdownTimer)
+      this._countdownTimer = null
     }
     const el = this.container
     el.removeEventListener('pointerdown', this._onDown)

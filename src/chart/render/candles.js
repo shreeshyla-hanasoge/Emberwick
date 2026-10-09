@@ -108,11 +108,26 @@ export function drawCandles(ctx, s) {
       ctx.font = theme.font
       ctx.textBaseline = 'middle'
       ctx.textAlign = 'left'
-      const tw = ctx.measureText(label).width
+      let tw = ctx.measureText(label).width
       ctx.fillStyle = up ? theme.up : theme.down
-      ctx.fillRect(plot.w + 1, y - 9, tw + 14, 18)
-      ctx.fillStyle = theme.tagText
-      ctx.fillText(label, plot.w + 8, y)
+      // The countdown to the candle's close rides in the same tag, under the
+      // price, the way TradingView draws it: one box, centred on the line,
+      // the price in its upper half and the timer in its lower half. The
+      // chart hands over the TEXT (or null), so this stays a pure renderer
+      // and the clock, the replay phase and the stale-data rule live in one
+      // place. Without a countdown the tag is exactly what it always was.
+      const countdown = typeof s.countdown === 'string' ? s.countdown : null
+      if (countdown === null) {
+        ctx.fillRect(plot.w + 1, y - 9, tw + 14, 18)
+        ctx.fillStyle = theme.tagText
+        ctx.fillText(label, plot.w + 8, y)
+      } else {
+        tw = Math.max(tw, ctx.measureText(countdown).width)
+        ctx.fillRect(plot.w + 1, y - 15, tw + 14, 30)
+        ctx.fillStyle = theme.tagText
+        ctx.fillText(label, plot.w + 8, y - 7)
+        ctx.fillText(countdown, plot.w + 8, y + 8)
+      }
     }
   }
 }

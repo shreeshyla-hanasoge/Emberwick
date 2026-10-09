@@ -34,6 +34,8 @@ export class RandomFeed extends DataFeed {
     this._last = start
     this._vol = volatility
     this._anchorTime = Math.floor(Date.now() / timeframe) * timeframe
+    /** The synthetic clock's reading while paused; null while it runs. See now(). */
+    this._frozen = null
   }
 
   _gauss() {
@@ -113,6 +115,7 @@ export class RandomFeed extends DataFeed {
 
   _start() {
     const interval = Math.max(16, 1000 / this.ticksPerSecond)
+    this._frozen = null
     this._timer = setInterval(() => this._tick(), interval)
   }
 
@@ -146,6 +149,24 @@ export class RandomFeed extends DataFeed {
     this._emit({ type: 'update', bar: { ...f } })
   }
 
+  /**
+   * The synthetic market's clock, in ms on its bars' time. A forming candle
+   * takes `timeframe / speed` real ms (see _tick), so wall-clock time is no
+   * use for the chart's close countdown at speed 60: this runs `speed` times
+   * faster inside the forming slot and counts a whole bar down in a second.
+   *
+   * Paused, the clock stops where it was: the bars' times are real-time
+   * slots, so a clock that kept running against a feed that had stopped
+   * would restart the countdown every second from a bar that never comes.
+   */
+  now() {
+    if (this._frozen !== null) return this._frozen
+    const tf = this.timeframe / this.speed
+    const real = Date.now()
+    const slot = Math.floor(real / tf) * tf
+    return slot + (real - slot) * this.speed
+  }
+
   setSpeed(s) { this.speed = s }
 
   setTicksPerSecond(n) {
@@ -161,7 +182,10 @@ export class RandomFeed extends DataFeed {
   get paused() { return !this._timer }
 
   stop() {
-    if (this._timer) clearInterval(this._timer)
+    if (this._timer) {
+      clearInterval(this._timer)
+      this._frozen = this.now()
+    }
     this._timer = null
   }
 

@@ -3,6 +3,54 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] — 2026-10-09
+
+**See when the candle closes.** The last-price tag counts down to the forming
+candle's close, the way TradingView's does.
+
+### Added
+
+- **Candle-close countdown** in the last-price tag: one box centred on the
+  price line, the price above and the time left below. The shape follows the
+  timeframe (`MM:SS`, `H:MM:SS`, `Dd HH:MM:SS`) so the tag keeps one width,
+  and seconds round up so a bar reads `00:01` until it closes. On by default;
+  `countdown: false` or `chart.setCountdown(false)` restores the single-row
+  tag unchanged.
+
+  Decisions worth recording:
+
+  - **Hidden when there is nothing honest to show.** A chart of history
+    alone, a stopped feed or a closed market would otherwise count below
+    zero. The tag shows `00:00` for one bar after the close, since a feed's
+    `append` is usually a beat late, and nothing after that. A clock a few
+    seconds behind the bars clamps to a full bar rather than blinking the
+    tag off at every open; a clock more than a bar off is treated as a
+    different clock and hidden.
+  - **Whose clock.** `Date.now()` by default. `options.clock` (ms on the
+    bars' clock) overrides it for bars not on wall-clock time, and a feed may
+    implement `now()` for the same purpose; the option wins over the feed.
+    `RandomFeed` implements it, so the demo's accelerated candles count a
+    whole minute down each second.
+  - **Replay has its own clock.** Under replay the countdown is the fraction
+    of the current bar that has played, `replay.phase`, so a backtest counts
+    in bar time rather than wall time. Paused, the bar is whole.
+  - **One repaint a second, only when counting.** A frame that draws a
+    countdown arms a single timer for the next whole second; a chart without
+    one stays at zero CPU as before. `destroy()` clears it.
+
+- `chart.setCountdown(on)`, `ChartOptions.countdown`, `ChartOptions.clock`,
+  `Feed.now()`, `Replay.phase`, and `fmtCountdown(remainingMs, tfMs)` exported
+  from the core.
+
+### Changed
+
+- **The core grew by +1.54 KB** gzipped in the unminified ESM (37.3 to
+  38.8 KB) and **+0.52 KB** in the minified UMD (21.2 to 21.7 KB), all of it
+  the countdown. The ESM budget moves to 39 KB; the UMD stays inside 22. The
+  size check now measures growth from 0.13.0, with +2 KB allowed.
+- `RandomFeed` stops its clock while paused, so a paused demo market holds
+  its countdown instead of counting into a bar that never comes.
+
 ## [0.13.0] — 2026-10-02
 
 **See where the volume traded.** Session and visible-range volume profiles,
