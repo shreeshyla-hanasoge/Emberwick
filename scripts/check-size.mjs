@@ -38,10 +38,15 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  * The profiles budgets follow the drawings' rule, ceil(1.2 × measured):
  * 9.7 KB for the unminified ESM gives 12, and 6.2 KB for the minified UMD
  * gives 8.
+ *
+ * 0.14 moved the core ESM budget to 39: the candle countdown measured
+ * 38.8 KB unminified, +1.54 KB over 0.13.0, most of it the "why" comments on
+ * the stale-data rule and the clock; the minified UMD took +0.52 KB and stays
+ * inside 22. The growth bound below now measures from 0.13.0.
  */
 const BUDGETS = [
   ['dist-lib/umd/emberwick.umd.js', 22],
-  ['dist-lib/index.js', 38], // unminified ESM; consumers minify
+  ['dist-lib/index.js', 39], // unminified ESM; consumers minify
   ['dist-lib/umd/emberwick-drawings.umd.js', 63],
   ['dist-lib/drawings.js', 85], // unminified ESM
   ['dist-lib/umd/emberwick-profiles.umd.js', 8],
@@ -52,18 +57,19 @@ const BUDGETS = [
  * Gzipped bytes of the previous release's core. The printed delta is what
  * "the core costs N KB more than it used to" means in the CHANGELOG, so it is
  * measured here, the same way every time, rather than worked out by hand.
- * (0.11.0, before the plugin seam: 32578 and 18130.)
+ * (0.11.0, before the plugin seam: 32578 and 18130; 0.12.0: 36877 and 20816.)
  */
-const BASELINE = { label: '0.12.0', 'dist-lib/index.js': 36877, 'dist-lib/umd/emberwick.umd.js': 20816 }
+const BASELINE = { label: '0.13.0', 'dist-lib/index.js': 38191, 'dist-lib/umd/emberwick.umd.js': 21700 }
 
 /**
- * How far the core may grow past BASELINE, in gzipped bytes: +1.5 KB, the
- * allowance 0.13 gave the four additions that volume profiles needed from
- * it. A hard failure rather than a note, because "a chart that does not use
- * profiles pays almost nothing for them" is only true while this holds, and
- * a KB-rounded budget would let half of it slip by unseen.
+ * How far the core may grow past BASELINE, in gzipped bytes: +2 KB. 0.13
+ * allowed +1.5 KB over 0.12.0 for the four additions volume profiles needed
+ * from the core; 0.14's candle countdown is a core feature and measured
+ * +1.54 KB in the ESM, so the bound is re-based on 0.13.0 with the same kind
+ * of margin. A hard failure rather than a note, because a KB-rounded budget
+ * would let half a feature's cost slip by unseen.
  */
-const MAX_CORE_GROWTH = 1536
+const MAX_CORE_GROWTH = 2048
 
 let failed = false
 

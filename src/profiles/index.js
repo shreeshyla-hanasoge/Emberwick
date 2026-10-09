@@ -27,7 +27,7 @@ import { version as coreVersion } from '../chart/index.js'
 import { VolumeProfile } from './VolumeProfile.js'
 import { DATA_VERSION } from './data.js'
 
-export const version = '0.13.0'
+export const version = '0.14.0'
 const mm = (v) => String(v).split('.').slice(0, 2).join('.')
 let warned = false
 function checkCore() {

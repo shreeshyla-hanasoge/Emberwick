@@ -235,6 +235,7 @@ await chart.setFeed(new MyApiFeed())
 | `getBars({ symbol, timeframe, to, limit })` | yes | `Promise<Bar[]>`. `to: null` means "most recent". Return `[]` to signal no more history |
 | `subscribe(handler)` | for live data | Returns an unsubscribe function |
 | `prime(lastBar)` | optional | Called once after history loads, so the feed can seed its forming candle |
+| `now()` | optional | The current time in ms **on the bars' clock**, for the candle-close countdown. See [Candle countdown](#candle-countdown) |
 | `destroy()` | optional | **Yours to call.** The chart never does: `detachFeed()` and `chart.destroy()` only run the unsubscribe that `subscribe()` returned |
 
 ### Update messages
@@ -273,6 +274,8 @@ const chart = createChart(el, {
   volumeRatio: 0.18,     // fraction of height for the volume strip
   magnet: true,          // crosshair snaps to nearest OHLC
   animate: true,         // live-candle easing
+  countdown: true,       // time to candle close, in the last-price tag
+  clock: () => Date.now(),   // now, on the bars' clock (see Candle countdown)
   touchCrosshair: true,  // tap to place, long-press to scrub (see Touch)
   touchCrosshairDelay: 350,  // ms a finger rests before a drag scrubs
   initialBars: 1500,     // first getBars() page size
@@ -308,6 +311,7 @@ const chart = createChart(el, {
 | `setPriceMode(mode)` | `'linear'` or `'log'` |
 | `setAnimate(bool)` | Toggle live-candle easing |
 | `setMagnet(bool)` | Toggle crosshair OHLC snapping |
+| `setCountdown(bool)` | Toggle the candle-close countdown in the last-price tag |
 | `visibleRange()` | The window currently on screen — the same payload the `'visibleRange'` event carries |
 | `snapToRealtime()` | Jump back to the newest bar and re-enable autoscale |
 | `startReplay(options?)` | Begin bar-by-bar playback. Returns the `Replay`, or `null` if there is nothing to replay |
@@ -427,6 +431,64 @@ payload on demand if you would rather poll than subscribe.
 
 ---
 
+## Candle countdown
+
+The last-price tag on the price axis counts down to the forming candle's
+close, the way TradingView does: one box centred on the price line, the price
+in its upper half and the time left in its lower half.
+
+```
+┌─────────┐
+│ 184.25  │  ← last close, coloured up/down as the line is
+│  04:37  │  ← closes in 4 minutes 37 seconds
+└─────────┘
+```
+
+The shape follows the chart timeframe, so the tag keeps one width while it
+counts: `MM:SS` under an hour, `H:MM:SS` under a day, `Dd HH:MM:SS` from a day
+up. Seconds round **up**, so a bar reads `00:01` until the moment it closes.
+On by default; `countdown: false` or `setCountdown(false)` removes the row and
+the tag is exactly the single-row tag it was.
+
+**It is hidden when there is nothing honest to show.** The time left is the
+last bar's open plus the timeframe, minus *now*:
+
+| *now* is | The tag shows |
+|---|---|
+| inside the last bar | the countdown |
+| up to one bar past its close | `00:00` — the bar closed and the next has not arrived; a feed is usually a beat late |
+| more than one bar past its close | nothing: history, a stopped feed, a closed market |
+| up to one bar **before** its open | a full bar — a few seconds of clock skew must not blink the tag at every open |
+| further before | nothing: that is a different clock, not skew |
+
+**Whose clock.** *now* is `Date.now()` unless the bars are not on wall-clock
+time. Then supply it, in ms on the bars' clock, either per chart or from the
+feed, which knows its own tape best; `options.clock` wins over `feed.now()`:
+
+```js
+// Bars stamped in exchange-local time, as if it were UTC: shift the clock the
+// same way, and the countdown lines up with the open.
+createChart(el, { clock: () => Date.now() + 5.5 * 36e5 })
+
+// A feed that replays a tape at 60x.
+class TapeFeed extends DataFeed {
+  now() { return this.tapeStart + (Date.now() - this.realStart) * 60 }
+}
+```
+
+`RandomFeed` implements `now()`, so the demo's `speed: 60` candles count a
+whole minute down each second.
+
+**Under replay** the countdown is the replay's own clock: the fraction of
+the current bar that has played. At 1× a 5-minute bar counts `05:00` → `00:00`
+in one second; paused, the bar is whole and reads `05:00`.
+
+**Cost.** A chart showing a countdown repaints once per second while idle,
+at the next whole second of its clock. A chart without one — hidden, or off —
+stays at zero CPU, as before.
+
+---
+
 ## Replay
 
 Play a fixed dataset back bar by bar — backtesting playback, a market-open
@@ -489,8 +551,9 @@ Every method returns the controller, so calls chain.
 | `setLoop(bool)` | Toggle looping |
 
 Readable state: `index`, `length`, `progress` (0–1), `speed`, `time`, `bar`,
-`atEnd`, `playing`, and `interval` (real ms between bars at the current
-speed).
+`atEnd`, `playing`, `interval` (real ms between bars at the current speed)
+and `phase` (how far into the current bar playback is, 0–1; what the
+candle-close countdown reads under replay).
 
 ### The `'replay'` event
 
@@ -2015,7 +2078,9 @@ new RandomFeed({
 ```
 
 Runtime controls: `setSpeed(n)`, `setTicksPerSecond(n)`, `setPaused(bool)`,
-`paused` (getter), `stop()`, `destroy()`.
+`paused` (getter), `stop()`, `destroy()`. It implements `now()`, the
+synthetic clock, so the [candle countdown](#candle-countdown) keeps pace with
+`speed`; paused, the clock stops where it was.
 
 Set `speed: 60` to see the flowing motion immediately instead of waiting a
 minute per candle.
@@ -2036,6 +2101,7 @@ import {
   easeOutCubic, easeInOutCubic,
   mulberry32,                   // seeded PRNG
   toNumber, DASH,               // the coercion and dash arrays inputs share
+  fmtCountdown,                 // time-to-close text, as the price tag prints it
   timeToIndex, indexToTime,     // time <-> fractional bar index
   isLight,                      // is this theme background light?
   version,

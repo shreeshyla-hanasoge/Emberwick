@@ -91,6 +91,16 @@ export class Replay {
   /** Real ms between bars at the current speed. */
   get interval() { return this.baseInterval / this.speed }
 
+  /**
+   * How far into the current bar playback is, 0..1: the chart's clock for
+   * the close countdown under replay. 0 right after a seek, a pause or at
+   * the end. tick() always takes every whole bar out of the accumulator,
+   * even the ones it does not reveal this frame, so this never reaches 1.
+   */
+  get phase() {
+    return this.length < 2 ? 0 : this._acc / this.baseInterval
+  }
+
   /** Snapshot handed to `subscribe('replay', fn)`. */
   state() {
     return {

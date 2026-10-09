@@ -303,6 +303,20 @@ export interface ChartOptions {
   touchCrosshairDelay?: number
   /** Master switch for tick/candle animation. Default true. */
   animate?: boolean
+  /**
+   * Count down to the forming candle's close in the last-price tag, the way
+   * TradingView does, under the price. Default true. Hidden on stale data —
+   * history alone, a stopped feed, a closed market — and driven by the
+   * replay's own clock under replay. setCountdown() updates it.
+   */
+  countdown?: boolean
+  /**
+   * The current time in ms ON THE BARS' CLOCK, for the countdown. Supply it
+   * when wall-clock time is not the bars' time: bars stamped in an exchange's
+   * local time, or a backtest tape. Wins over the feed's `now()`; defaults to
+   * Date.now().
+   */
+  clock?: () => number
   /** Draw the Emberwick wordmark behind chart data. Default true. */
   watermark?: boolean
   /** Bars requested from the feed on setFeed(). Default 1500. */
@@ -387,6 +401,12 @@ export interface Feed {
   subscribe(handler: FeedHandler): () => void
   /** Optional: called once with the newest bar after initial load. */
   prime?(bar: Bar | undefined): void
+  /**
+   * Optional: the current time in ms on the bars' clock, for the candle-close
+   * countdown. Implement it when wall-clock time is not the bars' time.
+   * `ChartOptions.clock` wins over it; absent both, the chart uses Date.now().
+   */
+  now?(): number
 }
 
 export declare class DataFeed implements Feed {
@@ -418,6 +438,8 @@ export interface RandomFeedOptions {
 
 export declare class RandomFeed extends DataFeed {
   constructor(opts?: RandomFeedOptions)
+  /** The synthetic clock: `speed` times faster than real time inside the forming bar. */
+  now(): number
   setSpeed(speed: number): void
   setTicksPerSecond(n: number): void
   setPaused(paused: boolean): void
@@ -525,6 +547,12 @@ export declare class Replay {
   readonly progress: number
   /** Real ms between bars at the current speed. */
   readonly interval: number
+  /**
+   * How far into the current bar playback is, 0..1; the clock behind the
+   * candle-close countdown under replay. 0 after a seek, a pause or at the
+   * end.
+   */
+  readonly phase: number
   index: number
   speed: number
   playing: boolean
@@ -634,6 +662,8 @@ export declare class Chart {
   setPriceMode(mode: PriceMode): void
   setAnimate(on: boolean): void
   setMagnet(on: boolean): void
+  /** Show or hide the candle-close countdown in the last-price tag. */
+  setCountdown(on: boolean): void
   snapToRealtime(): void
 
   /**
@@ -986,6 +1016,13 @@ export declare function mulberry32(seed: number): () => number
  * booleans, '' and everything else are NaN, never 0.
  */
 export declare function toNumber(v: unknown): number
+
+/**
+ * Time left until a candle closes, as the last-price tag prints it. The shape
+ * follows the timeframe so the tag keeps one width: `MM:SS` under an hour,
+ * `H:MM:SS` under a day, `Dd HH:MM:SS` from a day up. Seconds round up.
+ */
+export declare function fmtCountdown(remainingMs: number, tfMs: number): string
 
 /**
  * Fractional bar index of `time` (ms) in `bars`, which must ascend by time.

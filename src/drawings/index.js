@@ -31,7 +31,7 @@ import { measure } from './tools/measure.js'
 import { position } from './tools/position.js'
 import { text } from './tools/text.js'
 
-export const version = '0.13.0'
+export const version = '0.14.0'
 const mm = (v) => String(v).split('.').slice(0, 2).join('.')
 let warned = false
 export function checkCore() {
