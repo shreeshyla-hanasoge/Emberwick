@@ -3,6 +3,12 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.2] — 2026-10-15
+
+### Improved
+
+- **Smooth, uninterrupted touch crosshair:** Tapping on mobile toggles the crosshair on and off, while sliding a finger moves the crosshair freely across candles without accidental dismissals or chart panning. Touch tracking moves smoothly without aggressive OHLC magnet jumping.
+
 ## [0.14.1] — 2026-10-15
 
 ### Fixed

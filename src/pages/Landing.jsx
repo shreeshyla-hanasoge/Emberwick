@@ -570,7 +570,7 @@ function SeriesChart() {
  * instruments never trade through.
  */
 /** The release whose tag is accented. Everything else reads "since". */
-const CURRENT_RELEASE = '0.14.1'
+const CURRENT_RELEASE = '0.14.2'
 
 const ZONES = [
   { id: 'Asia/Kolkata', label: 'Mumbai' },
