@@ -486,3 +486,135 @@ test('replacing the bars on an overlapping range keeps the window AND the axis',
   assert.ok(labels.length > 0, 'a kept window must still draw its price axis')
   chart.destroy()
 })
+
+// The shared time guide is one overlay pass, segmented at pane boundaries.
+function crosshairSegments(chart) {
+  const points = chart.layers.canvas.overlay.ops.filter((o) => o.op === 'moveTo' || o.op === 'lineTo')
+  return Array.from({ length: points.length / 2 }, (_, i) => [points[2 * i].args, points[2 * i + 1].args])
+}
+
+function fourPaneChart() {
+  const chart = createChart(makeContainer())
+  chart.setData(makeBars(T0, 200, MIN, 24000))
+  for (const id of ['rsi', 'macd', 'signal']) {
+    chart.addPane(id)
+    chart.setSeries(id, { data: osc(), pane: id })
+  }
+  settle(chart)
+  return chart
+}
+
+function assertSharedGuide(chart, x, y) {
+  const rects = chart.panes().map((pane) => chart.paneRect(pane.id))
+  const hot = rects.find((r) => y >= r.y && y <= r.y + r.h)
+  assert.deepEqual(crosshairSegments(chart), [
+    ...rects.map((r) => [[Math.round(x) + 0.5, r.y], [Math.round(x) + 0.5, r.y + r.h]]),
+    [[hot.x, Math.round(y) + 0.5], [hot.x + hot.w, Math.round(y) + 0.5]],
+  ], 'vertical segments match every current plot exactly, with one horizontal segment in the hovered pane')
+  const ops = chart.layers.canvas.overlay.ops
+  assert.equal(ops.filter((o) => o.op === 'clearRect').length, 1, 'clear once for all panes')
+  assert.ok(ops.some((o) => o.op === 'setLineDash' && String(o.args[0]) === '4,4'))
+}
+
+for (const pointerType of ['mouse', 'pen']) {
+  test(`${pointerType} hover shares time across four panes, with pane-local price and one bottom timestamp`, () => {
+    const chart = fourPaneChart()
+    const seen = []
+    chart.subscribe('crosshair', (p) => seen.push(p))
+    const x = 401
+    const snappedX = chart.ts.x(Math.round(chart.ts.index(x)))
+    for (const pane of chart.panes()) {
+      const r = chart.paneRect(pane.id)
+      const y = r.y + r.h / 2
+      clearOps(chart)
+      chart._onMove({ pointerType, pointerId: 1, clientX: x, clientY: y, buttons: 0 })
+      frame(chart, 16, ['overlay'])
+      assertSharedGuide(chart, snappedX, y)
+      const labels = drawnText(chart, 'overlay')
+      assert.equal(labels.length, 2)
+      assert.equal(labels[0].y, y, 'price tag follows hovered pane')
+      assert.equal(Number(labels[0].text), Number(seen.at(-1).price.toFixed((labels[0].text.split('.')[1] || '').length)))
+      assert.equal(seen.at(-1).pane, pane.id)
+      const last = chart.paneRect('signal')
+      assert.equal(labels[1].y, last.y + last.h + 12)
+      assert.equal(chart.layers.canvas.main.ops.length, 0, 'hover must not repaint data')
+      assert.equal(chart.layers.canvas.base.ops.length, 0, 'hover must not repaint axes')
+    }
+    chart._onLeave()
+    clearOps(chart); frame(chart, 16, ['overlay'])
+    assert.deepEqual(chart.layers.canvas.overlay.ops, [{ op: 'clearRect', args: [0, 0, chart.layers.width, chart.layers.height] }])
+    assert.equal(seen.at(-1), null)
+    chart.destroy()
+  })
+}
+
+test('shared guide refreshes after resize, series visibility, pane removal and addition', () => {
+  const chart = fourPaneChart()
+  chart.cursor = { x: 400, y: 30, exact: true }
+  const check = () => {
+    clearOps(chart); frame(chart)
+    assertSharedGuide(chart, 400, 30)
+  }
+  check()
+  chart.container.getBoundingClientRect = () => ({ width: 720, height: 800, left: 0, top: 0 })
+  chart.resize(); settle(chart); check()
+  chart.setSeriesVisible('rsi', false); settle(chart); check()
+  assert.equal(chart.panes().length, 4, 'a hidden series does not hide its pane')
+  chart.removePane('macd'); settle(chart); check()
+  chart.addPane('new'); settle(chart); check()
+  for (const id of ['rsi', 'signal', 'new']) chart.removePane(id)
+  settle(chart); check()
+  assert.equal(crosshairSegments(chart).length, 2, 'single-pane rendering after removal')
+  chart.destroy()
+})
+
+test('separator gaps and axis gutters dismiss all shared crosshair segments', () => {
+  const chart = fourPaneChart()
+  const price = chart.paneRect('price')
+  for (const cursor of [
+    { x: 400, y: price.h + 3 },
+    { x: chart.plot.w + 1, y: 30 },
+    { x: 400, y: chart.layers.height - 1 },
+  ]) {
+    chart.cursor = cursor
+    clearOps(chart); frame(chart, 16, ['overlay'])
+    assert.deepEqual(crosshairSegments(chart), [])
+    assert.equal(drawnText(chart, 'overlay').length, 0)
+    assert.equal(chart.layers.canvas.overlay.ops[0].op, 'clearRect')
+  }
+  chart.destroy()
+})
+
+test('plugin exact positions and tags:false apply to the entire shared crosshair', () => {
+  const chart = fourPaneChart()
+  let host
+  chart.addPlugin({ attach(h) { host = h } })
+  const rect = chart.paneRect('macd')
+  const x = 403.2
+  const y = rect.y + 20.2
+  for (const tags of [true, false]) {
+    host.setCrosshair({ x, y, exact: true, price: 52.123, tags })
+    clearOps(chart); frame(chart, 16, ['overlay'])
+    assertSharedGuide(chart, x, y)
+    const labels = drawnText(chart, 'overlay')
+    assert.equal(labels.length, tags ? 2 : 0)
+    if (tags) assert.equal(Number(labels[0].text), 52.12)
+  }
+  host.setCrosshair(null)
+  clearOps(chart); frame(chart, 16, ['overlay'])
+  assert.equal(chart.layers.canvas.overlay.ops.length, 1, 'plugin dismissal only clears')
+  chart.destroy()
+})
+
+test('touch crosshair spans all panes until explicitly dismissed', () => {
+  const chart = fourPaneChart()
+  const rect = chart.paneRect('signal')
+  const event = { pointerType: 'touch', pointerId: 1, clientX: 400, clientY: rect.y + 20 }
+  chart._onDown(event); chart._onUp(event); chart._onLeave()
+  clearOps(chart); frame(chart, 16, ['overlay'])
+  assertSharedGuide(chart, chart.ts.x(Math.round(chart.ts.index(400))), event.clientY)
+  chart.hideCrosshair()
+  clearOps(chart); frame(chart, 16, ['overlay'])
+  assert.equal(chart.layers.canvas.overlay.ops.length, 1, 'touch dismissal only clears')
+  chart.destroy()
+})

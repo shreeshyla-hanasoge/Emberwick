@@ -40,8 +40,14 @@ export function drawCrosshair(ctx, s) {
   ctx.strokeStyle = theme.crosshair
   ctx.lineWidth = 1
   ctx.beginPath()
-  ctx.moveTo(Math.round(x) + 0.5, plot.y)
-  ctx.lineTo(Math.round(x) + 0.5, plot.y + plot.h)
+  // One shared time coordinate, separate segments so separator gaps stay clear.
+  // `plot` and `ps` still belong to the hovered pane for the horizontal guide
+  // and price tag. Direct single-pane callers need only supply `plot`.
+  for (const rect of s.panePlots || [plot]) {
+    if (rect.w <= 0 || rect.h <= 0 || x < rect.x || x > rect.x + rect.w) continue
+    ctx.moveTo(Math.round(x) + 0.5, rect.y)
+    ctx.lineTo(Math.round(x) + 0.5, rect.y + rect.h)
+  }
   ctx.moveTo(plot.x, Math.round(y) + 0.5)
   ctx.lineTo(plot.x + plot.w, Math.round(y) + 0.5)
   ctx.stroke()

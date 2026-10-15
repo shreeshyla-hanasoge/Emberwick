@@ -127,7 +127,7 @@ test('the crosshair only responds inside its own pane band', () => {
     'and one below it does too')
 })
 
-test('the crosshair lines span the pane band, not the whole canvas', () => {
+test('without shared pane geometry the crosshair lines stay inside the supplied pane', () => {
   const canvas = makeCanvas()
   drawCrosshair(canvas.getContext('2d'), paneState({ cursor: { x: 400, y: BAND.y + 50 } }))
   const verticalYs = canvas.ops

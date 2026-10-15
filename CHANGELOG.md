@@ -3,6 +3,15 @@
 All notable changes to Emberwick are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] — 2026-10-15
+
+### Fixed
+
+- The crosshair's vertical time guide now spans every pane, with a separate
+  segment inside each plot so separator gaps stay clear. The horizontal guide
+  and price tag follow the hovered pane; one timestamp stays on the shared
+  bottom axis. Pointer movement still repaints only the overlay.
+
 ## [0.14.0] — 2026-10-09
 
 **See when the candle closes.** The last-price tag counts down to the forming

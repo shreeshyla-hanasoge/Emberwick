@@ -1807,12 +1807,15 @@ export class Chart {
       )
     }
     if (redrawAll || dirty.has('overlay')) {
-      // The crosshair belongs to whichever pane the pointer is in, so its
-      // price tag reads that pane's scale rather than the price pane's.
+      // Resolve the horizontal guide and price tag against the hovered pane,
+      // but draw the shared time guide through every current pane in one pass.
       const hot = this.cursor ? paneAtY(this._panes, this.cursor.y) : null
       drawCrosshair(
         this.layers.ctx.overlay,
-        hot && hot !== this._panes[0] ? this._paneState(state, hot) : state,
+        {
+          ...(hot && hot !== this._panes[0] ? this._paneState(state, hot) : state),
+          panePlots: this._panes.map((pane) => pane.rect),
+        },
       )
     }
 

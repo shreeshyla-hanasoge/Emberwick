@@ -518,10 +518,10 @@ const CORE_MUTANTS = [
     replace: '  if (cursor.y < 0 || cursor.y > plot.h) return',
   },
   {
-    name: 'The crosshair spans the whole canvas rather than its pane',
+    name: 'The crosshair segments start at the canvas top rather than each pane',
     file: 'src/chart/render/crosshair.js',
-    find: '  ctx.moveTo(Math.round(x) + 0.5, plot.y)\n  ctx.lineTo(Math.round(x) + 0.5, plot.y + plot.h)',
-    replace: '  ctx.moveTo(Math.round(x) + 0.5, 0)\n  ctx.lineTo(Math.round(x) + 0.5, plot.h)',
+    find: '    ctx.moveTo(Math.round(x) + 0.5, rect.y)\n    ctx.lineTo(Math.round(x) + 0.5, rect.y + rect.h)',
+    replace: '    ctx.moveTo(Math.round(x) + 0.5, 0)\n    ctx.lineTo(Math.round(x) + 0.5, rect.y + rect.h)',
   },
   {
     name: 'A sub-pane is fitted to the bars as well as its series',
