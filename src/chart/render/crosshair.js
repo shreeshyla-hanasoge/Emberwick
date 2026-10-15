@@ -21,7 +21,7 @@ export function drawCrosshair(ctx, s) {
   let y = cursor.y
   if (bar && !cursor.exact) {
     x = ts.x(i) // snap to the bar slot
-    if (magnet) {
+    if (magnet && !cursor.free) {
       // magnet to the nearest OHLC value
       const cands = [bar.open, bar.high, bar.low, bar.close]
       let best = null

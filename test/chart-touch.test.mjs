@@ -69,12 +69,12 @@ test('a tap emits the crosshair payload a readout subscribes to', () => {
   assert.ok(Number.isFinite(seen[0].price), 'carries a price')
 })
 
-test('a second tap moves the crosshair rather than adding one', () => {
+test('a second tap dismisses the crosshair', () => {
   const chart = charted()
   chart._onDown(touch(400, 200)); chart._onUp(touch(400, 200))
+  assert.ok(chart.cursor, 'first tap placed crosshair')
   chart._onDown(touch(600, 300)); chart._onUp(touch(600, 300))
-  assert.equal(chart.cursor.x, 600)
-  assert.equal(chart.cursor.y, 300)
+  assert.equal(chart.cursor, null, 'second tap dismissed crosshair')
 })
 
 test('a tap does not pan the chart', () => {
@@ -136,14 +136,27 @@ test('an immediate drag still pans, and hides the crosshair while it does', () =
   assert.equal(chart.cursor, null, 'and none left behind')
 })
 
-test('a drag past the slop dismisses a crosshair an earlier tap placed', () => {
+test('sliding a finger moves the crosshair freely when one was already placed', () => {
   const chart = charted()
+  const before = chart.ts._right.target
   chart._onDown(touch(400, 200)); chart._onUp(touch(400, 200))
   assert.ok(chart.cursor)
 
   chart._onDown(touch(400, 200))
   chart._onMove(touch(320, 200))
-  assert.equal(chart.cursor, null, 'panning cleared the stale crosshair')
+  assert.ok(chart.cursor, 'crosshair moves freely')
+  assert.equal(chart.cursor.x, 320)
+  assert.equal(chart.cursor.y, 200)
+  assert.equal(chart.cursor.free, true)
+  assert.equal(chart.ts._right.target, before, 'sliding the crosshair does not pan')
+
+  chart._onUp(touch(320, 200))
+  assert.ok(chart.cursor, 'crosshair stays standing after finger lifts')
+  assert.equal(chart.cursor.x, 320)
+
+  // Another tap dismisses it
+  chart._onDown(touch(320, 200)); chart._onUp(touch(320, 200))
+  assert.equal(chart.cursor, null, 'tap dismisses the standing crosshair')
 })
 
 test('finger drift under the slop is a tap, not a pan', () => {

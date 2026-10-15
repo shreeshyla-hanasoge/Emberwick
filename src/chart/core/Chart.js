@@ -698,6 +698,7 @@ export class Chart {
     let touchMode = null
     let downX = 0
     let downY = 0
+    let downSticky = false
 
     /**
      * Movement below this is a tap, not a drag. Fingers are imprecise and a
@@ -817,18 +818,25 @@ export class Chart {
        * is still an axis drag -- the crosshair has nothing to say there.
        */
       clearHold()
+      downSticky = !!this._stickyCursor
       if (e.pointerType === 'touch' && this.options.touchCrosshair !== false && mode === 'pan') {
-        touchMode = 'pending'
-        downX = p.x
-        downY = p.y
-        this._holdTimer = setTimeout(() => {
-          this._holdTimer = null
-          if (touchMode !== 'pending') return
+        if (downSticky) {
           touchMode = 'scrub'
-          // The finger has not moved, so the crosshair belongs where it went
-          // down -- not at some later position this callback cannot see.
-          placeCrosshair({ x: downX, y: downY })
-        }, Math.max(0, +this.options.touchCrosshairDelay || 0))
+          downX = p.x
+          downY = p.y
+        } else {
+          touchMode = 'pending'
+          downX = p.x
+          downY = p.y
+          this._holdTimer = setTimeout(() => {
+            this._holdTimer = null
+            if (touchMode !== 'pending') return
+            touchMode = 'scrub'
+            // The finger has not moved, so the crosshair belongs where it went
+            // down -- not at some later position this callback cannot see.
+            placeCrosshair({ x: downX, y: downY, free: true })
+          }, Math.max(0, +this.options.touchCrosshairDelay || 0))
+        }
       } else {
         touchMode = null
       }
@@ -913,7 +921,7 @@ export class Chart {
        * underneath it.
        */
       if (touchMode === 'scrub') {
-        placeCrosshair(p)
+        placeCrosshair({ x: p.x, y: p.y, free: true })
         lastX = p.x
         lastY = p.y
         lastT = performance.now()
@@ -989,6 +997,7 @@ export class Chart {
       // was not saying it to the chart.
       clearHold()
       touchMode = null
+      downSticky = false
       dismissCrosshair()
       if (dragPane && panDy) {
         dragPane.ps.panBy(-panDy)
@@ -1063,7 +1072,8 @@ export class Chart {
       // D27. Any region (a price-axis tag is a hit target too), offered at the
       // DOWN point: that is what the reader aimed at.
       const isTap = !cancelling && dragging && downButton === 0 &&
-        touchMode !== 'scrub' && touchMode !== 'pan' &&
+        touchMode !== 'pan' &&
+        (downSticky || touchMode !== 'scrub') &&
         travel < (downType === 'touch' ? TOUCH_SLOP : 3)
       if (isTap && this._plugins.length) {
         if (this._offer('tap', this._pointer(e, { x: downX, y: downY }))) {
@@ -1077,11 +1087,13 @@ export class Chart {
        * one that did nothing at all before -- cursor was only ever assigned
        * on move, so a tap that never moved never drew anything.
        */
+      if (isTap && !claimed && downSticky) dismissCrosshair()
       if (touchMode === 'pending') placeCrosshair({ x: downX, y: downY })
       // A scrub ends with its crosshair left standing. Nothing to release:
       // a scrub never fed the inertia sampler, so there is no flick to coast.
       const wasScrub = touchMode === 'scrub'
       touchMode = null
+      downSticky = false
       if (dragging && mode === 'pan' && moved && !wasScrub) {
         this.inertia.release()
         this.loop.invalidate('all')
