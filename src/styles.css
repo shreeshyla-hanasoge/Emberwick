@@ -782,6 +782,20 @@ kbd {
 }
 .lp-navcta:hover { border-color: rgba(38,166,154,0.5); }
 
+/* light / dark switch: a button among the links, so the phone rule that hides links leaves it */
+.lp-themetog {
+  display: inline-grid; place-items: center;
+  width: 34px; height: 34px; flex-shrink: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.lp-themetog:hover { color: var(--text); border-color: rgba(38,166,154,0.5); }
+.lp-themetog:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* eleven links and a button do not fit below ~1130px: tighten, then keep the two that matter most */
 @media (max-width: 1130px) {
   .lp-navlinks { gap: 12px; }
@@ -897,6 +911,16 @@ kbd {
 .lp-btn-primary:hover {
   transform: translateY(-1px);
   box-shadow: 0 10px 30px rgba(38,166,154,0.34);
+}
+
+/* the hero CTA wears the ember amber (the drawing accent) instead of teal */
+.lp-cta .lp-btn-primary {
+  color: #1a1204;
+  background: linear-gradient(140deg, #ffb84d, #f5a524);
+  box-shadow: 0 6px 24px rgba(245,165,36,0.28);
+}
+.lp-cta .lp-btn-primary:hover {
+  box-shadow: 0 10px 30px rgba(245,165,36,0.38);
 }
 
 /* ---- hero chart ---- */
@@ -1809,3 +1833,86 @@ kbd {
   .lp-copyline code { font-size: 12px; }
   .lp-roadrow { flex-direction: column; gap: 10px; }
 }
+
+/* ========================================================================= */
+/* LANDING PAGE: LIGHT THEME                                                 */
+/* ========================================================================= */
+/* The nav toggle puts .lp-light on <html> (src/components/colorScheme.js) and
+   removes it when the landing page unmounts, so the playground keeps its own
+   .app.light switch. The variables recolour everything written against them;
+   the rules below cover the landing's hard-coded dark surfaces. Each selector
+   is wrapped in :where() so it adds no specificity: it beats the base rule on
+   source order, and state rules (.is-on, .has-live, .lp-rdot-live) still win. */
+html.lp-light {
+  color-scheme: light;
+  --bg: #f4f6fa;
+  --panel: #ffffff;
+  --border: #e2e6ee;
+  --text: #111827;
+  --muted: #6b7280;
+}
+
+:where(html.lp-light) .lp-glow {
+  background: radial-gradient(closest-side, rgba(38,166,154,0.13), transparent 70%);
+}
+:where(html.lp-light) .lp-hero h1 em {
+  background-image: linear-gradient(100deg, #17867a, var(--accent) 55%, #3dbcae);
+}
+
+:where(html.lp-light) .lp-copyline { background: #ffffff; }
+:where(html.lp-light) .lp-copyline button { background: rgba(15,23,42,0.03); }
+
+:where(html.lp-light) .lp-chartwrap {
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15,23,42,0.10);
+}
+:where(html.lp-light) :is(.lp-annochart, .lp-replaychart, .lp-rangechart) .lp-chartwrap,
+:where(html.lp-light) .lp-profwrap { box-shadow: 0 14px 40px rgba(15,23,42,0.08); }
+:where(html.lp-light) .lp-chartbar { background: #f8fafc; }
+:where(html.lp-light) :is(.lp-dot-a, .lp-dot-b, .lp-dot-c) { background: #d6dce6; }
+:where(html.lp-light) .lp-rdot:not(.lp-rdot-live) { background: #cbd3de; }
+
+:where(html.lp-light) .lp-stat { background: rgba(255,255,255,0.75); }
+:where(html.lp-light) .lp-card { background: linear-gradient(180deg, #ffffff, #f9fafc); }
+:where(html.lp-light) .lp-card:hover { box-shadow: 0 10px 30px rgba(15,23,42,0.06); }
+
+:where(html.lp-light) .lp-code { background: #ffffff; }
+:where(html.lp-light) .lp-code pre,
+:where(html.lp-light) .lp-feedbox pre { color: #334155; }
+:where(html.lp-light) .lp-feedbox { background: linear-gradient(180deg, #ffffff, #f9fafc); }
+:where(html.lp-light) .lp-feedbox pre { background: #f8fafc; }
+
+:where(html.lp-light) .lp-roadrow { background: rgba(255,255,255,0.7); }
+:where(html.lp-light) .lp-footcta {
+  background:
+    radial-gradient(600px 220px at 50% 0%, rgba(38,166,154,0.10), transparent 70%),
+    linear-gradient(180deg, #ffffff, #f8fafc);
+}
+:where(html.lp-light) .lp-fine { color: #8a93a5; }
+:where(html.lp-light) .lp-tag-since { background: rgba(15,23,42,0.03); }
+
+:where(html.lp-light) :is(.lp-serieslegend, .lp-annoread, .lp-transport, .lp-shapes) { background: rgba(255,255,255,0.8); }
+:where(html.lp-light) .lp-serieschip.is-on { background: rgba(15,23,42,0.04); }
+:where(html.lp-light) .lp-tbtn:not(.is-on):hover { border-color: #b9c1cd; }
+
+:where(html.lp-light) .lp-drawstage .rail { background: #f8fafc; }
+:where(html.lp-light) :is(.lp-drawstage, .lp-chartbar-tools) .rail-btn:not(.on):hover { background: rgba(15,23,42,0.06); }
+:where(html.lp-light) .lp-coach {
+  background: rgba(255,255,255,0.92);
+  box-shadow: 0 8px 24px rgba(15,23,42,0.12);
+}
+
+:where(html.lp-light) .lp-minimap {
+  background:
+    repeating-linear-gradient(90deg, rgba(15,23,42,0.06) 0 1px, transparent 1px 8px),
+    rgba(255,255,255,0.8);
+}
+:where(html.lp-light) .lp-minimap-l,
+:where(html.lp-light) .lp-unit,
+:where(html.lp-light) .lp-payloadwait { color: #9aa3b2; }
+:where(html.lp-light) .lp-payload { background: #ffffff; }
+:where(html.lp-light) .lp-payloadlist dt { color: #6b7280; }
+:where(html.lp-light) .lp-payloadlist dd { color: #1f2937; }
+
+:where(html.lp-light) .lp-annofact { background: linear-gradient(180deg, #ffffff, #f9fafc); }
+:where(html.lp-light) .lp-shapes code { color: #334155; background: #f8fafc; }

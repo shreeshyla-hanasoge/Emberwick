@@ -7,6 +7,8 @@ import ProfilesShowcase from '../components/ProfilesDemo.jsx'
 import ToolRail from '../components/ToolRail.jsx'
 import { useDrawings } from '../components/useDrawings.js'
 import { pickScenes } from '../components/scenes.js'
+import { Icon } from '../components/Icons.jsx'
+import { LightContext, chartTheme, usePageScheme, useChartTheme } from '../components/colorScheme.js'
 
 const NPM_URL = 'https://www.npmjs.com/package/emberwick'
 const CDN_URL = 'https://unpkg.com/emberwick/umd/emberwick.umd.js'
@@ -31,6 +33,8 @@ const HERO_RAIL = ['trendLine', 'fibRetracement', 'long', 'rectangle']
 
 function HeroChart() {
   const hostRef = useRef(null)
+  const chartRef = useRef(null)
+  const light = useChartTheme(chartRef)
   const wrapRef = useRef(null)
   const feedRef = useRef(null)
   const armedRef = useRef(false)
@@ -68,10 +72,11 @@ function HeroChart() {
     // would report the window it has reached so far.
     const fits = Math.floor((host.clientWidth - 72) / spacing) - offset
     const chart = createChart(host, {
-      theme: { ...defaultTheme, background: '#0a0d15' },
+      theme: chartTheme(light),
       initialBars: 600,
       timeScale: { spacing, rightOffset: offset },
     })
+    chartRef.current = chart
     // Enabled right after the chart, destroyed before it: see Playground.
     const d = enableDrawings(chart)
     setDc(d)
@@ -135,6 +140,7 @@ function HeroChart() {
       d.destroy()
       feed.destroy()
       chart.destroy()
+      chartRef.current = null
       feedRef.current = null
     }
   }, [])
@@ -180,16 +186,19 @@ function HeroChart() {
  */
 function MarkersChart() {
   const hostRef = useRef(null)
+  const chartRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [active, setActive] = useState(null)
+  const light = useChartTheme(chartRef)
 
   useEffect(() => {
     let disposed = false
     const chart = createChart(hostRef.current, {
-      theme: { ...defaultTheme, background: '#0a0d15' },
+      theme: chartTheme(light),
       timeScale: { spacing: 12, rightOffset: 6 },
       priceScale: { marginTop: 0.2, marginBottom: 0.16 },
     })
+    chartRef.current = chart
 
     const feed = new RandomFeed({
       symbol: 'EMBR',
@@ -290,6 +299,7 @@ function MarkersChart() {
       offClick()
       feed.destroy()
       chart.destroy()
+      chartRef.current = null
     }
   }, [])
 
@@ -390,11 +400,12 @@ function CountdownChart() {
   const feedRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [on, setOn] = useState(true)
+  const light = useChartTheme(chartRef)
 
   useEffect(() => {
     let disposed = false
     const chart = createChart(hostRef.current, {
-      theme: { ...defaultTheme, background: '#0a0d15' },
+      theme: chartTheme(light),
       initialBars: 400,
       timeScale: { spacing: 9, rightOffset: 8 },
       priceScale: { marginTop: 0.18, marginBottom: 0.16 },
@@ -472,11 +483,12 @@ function SeriesChart() {
   const chartRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [on, setOn] = useState(() => SERIES_DEFS.map(() => true))
+  const light = useChartTheme(chartRef)
 
   useEffect(() => {
     let disposed = false
     const chart = createChart(hostRef.current, {
-      theme: { ...defaultTheme, background: '#0a0d15' },
+      theme: chartTheme(light),
       timeScale: { spacing: 9, rightOffset: 6 },
       priceScale: { marginTop: 0.18, marginBottom: 0.16 },
     })
@@ -594,11 +606,12 @@ function ViewChart() {
   const [ready, setReady] = useState(false)
   const [zone, setZone] = useState(ZONES[0].id)
   const [fitted, setFitted] = useState(false)
+  const light = useChartTheme(chartRef)
 
   useEffect(() => {
     let disposed = false
     const chart = createChart(hostRef.current, {
-      theme: { ...defaultTheme, background: '#0a0d15' },
+      theme: chartTheme(light),
       timeZone: ZONES[0].id,
       timeScale: { spacing: 9, rightOffset: 4 },
       priceScale: { marginTop: 0.16, marginBottom: 0.14 },
@@ -715,11 +728,12 @@ function PanesChart() {
   const dataRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [split, setSplit] = useState(true)
+  const light = useChartTheme(chartRef)
 
   useEffect(() => {
     let disposed = false
     const chart = createChart(hostRef.current, {
-      theme: { ...defaultTheme, background: '#0a0d15' },
+      theme: chartTheme(light),
       timeScale: { spacing: 7, rightOffset: 4 },
       priceScale: { marginTop: 0.16, marginBottom: 0.14 },
     })
@@ -816,12 +830,13 @@ function ReplayChart() {
   const chartRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [rp, setRp] = useState(null)
+  const light = useChartTheme(chartRef)
 
   useEffect(() => {
     let disposed = false
     let off = null
     const chart = createChart(hostRef.current, {
-      theme: { ...defaultTheme, background: '#0a0d15' },
+      theme: chartTheme(light),
       timeScale: { spacing: 6, rightOffset: 8 },
     })
     chartRef.current = chart
@@ -1051,16 +1066,19 @@ const FEATURES = [
  */
 function RangeChart() {
   const hostRef = useRef(null)
+  const chartRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [range, setRange] = useState(null)
+  const light = useChartTheme(chartRef)
 
   useEffect(() => {
     let disposed = false
     let off = null
     const chart = createChart(hostRef.current, {
-      theme: { ...defaultTheme, background: '#0a0d15' },
+      theme: chartTheme(light),
       timeScale: { spacing: 3.2, rightOffset: 8 },
     })
+    chartRef.current = chart
     const feed = new RandomFeed({
       symbol: 'EMBR',
       timeframe: 60000,
@@ -1084,6 +1102,7 @@ function RangeChart() {
       disposed = true
       if (off) off()
       chart.destroy()
+      chartRef.current = null
     }
   }, [])
 
@@ -1172,6 +1191,15 @@ const ROADMAP = [
 
 /* --------------------------------------------------------------- landing -- */
 export default function Landing() {
+  const [light, setLight] = usePageScheme()
+  return (
+    <LightContext.Provider value={light}>
+      <LandingPage light={light} onToggle={() => setLight((v) => !v)} />
+    </LightContext.Provider>
+  )
+}
+
+function LandingPage({ light, onToggle }) {
   return (
     <div className="lp">
       <div className="lp-glow" aria-hidden="true" />
@@ -1195,6 +1223,15 @@ export default function Landing() {
           <a href="#usage">Usage</a>
           <a href="#roadmap">Roadmap</a>
           <a href={NPM_URL} target="_blank" rel="noreferrer">npm</a>
+          <button
+            type="button"
+            className="lp-themetog"
+            onClick={onToggle}
+            aria-label={light ? 'Switch to dark theme' : 'Switch to light theme'}
+            title={light ? 'Dark theme' : 'Light theme'}
+          >
+            <Icon name={light ? 'moon' : 'sun'} size={16} />
+          </button>
           <a className="lp-navcta" href="#/playground">Playground →</a>
         </nav>
       </header>

@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { createChart, defaultTheme, lightTheme } from '../chart/index.js'
 import { createVolumeProfile } from '../profiles/index.js'
 import { Icon } from './Icons.jsx'
 import { aggregate, binBars, buildProfiles, splitSessions } from './profileData.js'
 import { createTape, sessionOf, SESSION_MINUTES } from './profileTape.js'
+import { LightContext } from './colorScheme.js'
 
 /**
  * The landing page's volume-profile demo: a real chart, the real controller,
@@ -123,7 +124,8 @@ export default function ProfilesShowcase() {
   const [mode, setMode] = useState('session')
   const [valueArea, setValueArea] = useState(true)
   const [extendPoc, setExtendPoc] = useState(false)
-  const [light, setLight] = useState(false)
+  const pageLight = useContext(LightContext)
+  const [light, setLight] = useState(pageLight)
   const [live, setLive] = useState(() => !reducedMotion())
   const [replaying, setReplaying] = useState(false)
   const [hover, setHover] = useState(null)
@@ -144,7 +146,7 @@ export default function ProfilesShowcase() {
     const spacing = Math.max(3.3, Math.min(7, (w - 68) / (BARS_PER_SESSION * 2.55)))
 
     const chart = createChart(host, {
-      theme: DARK,
+      theme: light ? lightTheme : DARK,
       timeScale: { spacing, rightOffset: 5 },
       priceScale: { marginTop: 0.14, marginBottom: 0.26 },
     })
@@ -183,6 +185,8 @@ export default function ProfilesShowcase() {
   useEffect(() => { vpRef.current?.setOptions({ mode, valueArea, extendPoc }) }, [mode, valueArea, extendPoc])
   // The profile's colours derive from the chart theme: this one call recolours both.
   useEffect(() => { chartRef.current?.setTheme(light ? lightTheme : DARK) }, [light])
+  // The page's nav toggle drives this too; the chip below still flips the demo on its own.
+  useEffect(() => { setLight(pageLight) }, [pageLight])
 
   /* ------------------------------------------------ visible on screen or not -- */
   useEffect(() => {

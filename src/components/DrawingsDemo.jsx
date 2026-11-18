@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createChart, RandomFeed, defaultTheme } from '../chart/index.js'
+import { createChart, RandomFeed } from '../chart/index.js'
+import { chartTheme, useChartTheme } from './colorScheme.js'
 import { enableDrawings, timeToIndex, TOOL_PRESETS } from '../drawings/index.js'
 import { Icon } from './Icons.jsx'
 import ToolRail from './ToolRail.jsx'
@@ -175,6 +176,7 @@ export default function DrawingsShowcase() {
   const [rev, setRev] = useState(0)
   const [lastId, setLastId] = useState(null)
   const { tool, history, selected } = useDrawings(dc)
+  const light = useChartTheme(chartRef)
 
   const setPhase = (p) => {
     phaseRef.current = p
@@ -194,7 +196,7 @@ export default function DrawingsShowcase() {
     const fits = Math.floor((w - 72) / spacing) - 8
 
     const chart = createChart(host, {
-      theme: { ...defaultTheme, background: '#0a0d15' },
+      theme: chartTheme(light),
       timeScale: { spacing, rightOffset: 8 },
       priceScale: { marginTop: 0.22, marginBottom: 0.14 },
     })
